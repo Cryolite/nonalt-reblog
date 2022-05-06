@@ -1,0 +1,24 @@
+{
+    "manifest_version": 3,
+    "name": "Nonalt Reblog",
+    "description": "Reblog on Tumblr without Alt Key",
+    "homepage_url": "https://github.com/Cryolite/nonalt-reblog",
+    "version": "0.0.1",
+    "background": {
+        "service_worker": "background.js"
+    },
+    "host_permissions": [
+        "https://*/*"
+    ],
+    "permissions": [
+        "tabs",
+        "webNavigation",
+        "scripting",
+        "storage"
+    ],
+    "externally_connectable": {
+        "matches": [
+            "https://www.tumblr.com/dashboard"
+        ]
+    }
+}
