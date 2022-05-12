@@ -14,7 +14,8 @@
         "tabs",
         "webNavigation",
         "scripting",
-        "storage"
+        "storage",
+        "contextMenus"
     ],
     "externally_connectable": {
         "matches": [
