@@ -17,7 +17,16 @@ async function sleep(milliseconds) {
     return promise;
 }
 
+// Create a new tab and wait for the resource loading for the page on that tab
+// to complete.
 async function createTab(createProperties) {
+    if ('openerTabId' in createProperties && 'windowId' in createProperties === false) {
+        const openerTabId = createProperties.openerTabId;
+        const openerTab = await chrome.tabs.get(openerTabId);
+        const windowId = openerTab.windowId;
+        createProperties.windowId = windowId;
+    }
+
     const tab = await chrome.tabs.create(createProperties);
 
     const promise = new Promise((resolve, reject) => {
@@ -26,12 +35,6 @@ async function createTab(createProperties) {
                 return;
             }
             resolve(tab);
-        }, {
-            url: [
-                {
-                    urlMatches: createProperties.url
-                }
-            ]
         });
     });
 
@@ -61,23 +64,23 @@ async function expandPixivArtworks(tabId) {
         },
         func: () => {
             function expandImpl(element) {
-                while (true) {
+                checkAndClick: {
                     if (typeof element.nodeName !== 'string') {
-                        break;
+                        break checkAndClick;
                     }
                     const name = element.nodeName.toUpperCase();
                     if (name !== 'DIV') {
-                        break;
+                        break checkAndClick;
                     }
 
                     const innerText = element.innerText;
                     if (innerText.search(/^\d+\/\d+$/) === -1) {
-                        break;
+                        break checkAndClick;
                     }
 
                     const onclick = element.onclick;
                     if (onclick === null) {
-                        break;
+                        break checkAndClick;
                     }
 
                     element.click();
@@ -97,8 +100,23 @@ async function expandPixivArtworks(tabId) {
 
 async function getPixivImageUrlsImpl(tabId, sourceUrl, imageUrls) {
     const newTab = await createTab({
+        openerTabId: tabId,
         url: sourceUrl,
         active: false
+    });
+    // Resource loading for the page sometimes takes a long time. In such cases,
+    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
+    // injection sets a time limit on resource loading for the page.
+    await executeScript({
+        target: {
+            tabId: newTab.id
+        },
+        func: () => {
+            setTimeout(() => {
+                window.stop();
+            }, 60 * 1000);
+        },
+        world: 'MAIN'
     });
 
     await expandPixivArtworks(newTab.id);
@@ -119,7 +137,7 @@ async function getPixivImageUrlsImpl(tabId, sourceUrl, imageUrls) {
         world: 'MAIN'
     });
 
-    await chrome.tabs.remove(newTab.id);
+    chrome.tabs.remove(newTab.id);
 
     const imageUrlPattern = /^https:\/\/i\.pximg\.net\/img-original\/img\/\d{4}(?:\/\d{2}){5}\/\d+_p0\.\w+/;
     for (const imageUrl of linkUrls) {
@@ -161,11 +179,29 @@ async function getPixivImageUrls(tabId, hrefs, innerText) {
 }
 
 async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
+    // To retrieve the URL of the original images from a Twitter tweet URL, open
+    // the tweet page in the foreground, wait a few seconds, and extract the
+    // URLs from the `images`.
     const newTab = await createTab({
+        openerTabId: tabId,
         url: sourceUrl,
         active: true
     });
-    await sleep(3000);
+    // Resource loading for the page sometimes takes a long time. In such cases,
+    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
+    // injection sets a time limit on resource loading for the page.
+    await executeScript({
+        target: {
+            tabId: newTab.id
+        },
+        func: () => {
+            setTimeout(() => {
+                window.stop();
+            }, 60 * 1000);
+        },
+        world: 'MAIN'
+    });
+    await sleep(4 * 1000);
 
     const imageUrls = await executeScript({
         target: {
@@ -183,13 +219,7 @@ async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
         world: 'MAIN'
     });
 
-    {
-        const tab = await chrome.tabs.get(tabId);
-        await chrome.tabs.highlight({
-            tabs: tab.index
-        });
-    }
-    await chrome.tabs.remove(newTab.id);
+    chrome.tabs.remove(newTab.id);
 
     const imageUrlPattern = /^(https:\/\/pbs\.twimg\.com\/media\/[^\?]+\?format=[^&]+)&name=.+/;
     const imageUrlReplacement = '$1&name=orig';
@@ -251,82 +281,405 @@ async function getImageUrls(tabId, hrefs, innerText, sendResponse) {
     });
 }
 
-async function isInPreflight(tabId) {
-    return await executeScript({
+async function queueForReblogging(tabId, postUrl, imageUrls, sendResponse) {
+    const items = await chrome.storage.local.get('reblogQueue');
+    if ('reblogQueue' in items === false) {
+        items['reblogQueue'] = [];
+    }
+    items['reblogQueue'].push({
+        postUrl: postUrl,
+        imageUrls: imageUrls
+    });
+    await chrome.storage.local.set(items);
+
+    executeScript({
         target: {
             tabId: tabId
         },
-        func: () => {
-            return nonaltReblog.preflight;
-        },
-        world: 'MAIN'
+        func: postUrl => { console.info(`${postUrl}: Queued for reblogging.`); },
+        args: [postUrl]
+    });
+
+    sendResponse({
+        errorMessage: null
     });
 }
 
-async function togglePreflight(tabId) {
-    if (!await isInPreflight(tabId)) {
+async function dequeueForReblogging(tabId) {
+    const userAgent = executeScript({
+        target: {
+            tabId: tabId
+        },
+        func: () => navigator.userAgent,
+        world: 'MAIN'
+    });
+
+    const items = await chrome.storage.local.get('reblogQueue');
+    if ('reblogQueue' in items === false) {
+        return;
+    }
+    const reblogQueue = items.reblogQueue;
+
+    while (reblogQueue.length > 0) {
+        const postUrl = reblogQueue[0].postUrl;
+        if (typeof postUrl !== 'string') {
+            console.assert(typeof postUrl === 'string', typeof postUrl);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: (postUrl) => { console.assert(typeof postUrl === 'string', typeof postUrl); },
+                args: [postUrl]
+            })
+            return;
+        }
+
+        const imageUrls = reblogQueue[0].imageUrls;
+        if (Array.isArray(imageUrls) === false) {
+            console.assert(Array.isArray(imageUrls), typeof imageUrls);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: imageUrls => { console.assert(Array.isArray(imageUrls), typeof imageUrls); },
+                args: [imageUrls]
+            });
+            return;
+        }
+        for (const imageUrl of imageUrls) {
+            if (typeof imageUrl !== 'string') {
+                console.assert(typeof imageUrl === 'string', typeof imageUrl);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: imageUrl => { console.assert(typeof imageUrl === 'string', typeof imageUrl); },
+                    args: [imageUrl]
+                });
+                return;
+            }
+        }
+
+        {
+            // Check if all the image URLs have already been recorded in the
+            // local storage as reblogged, and if so, skip the post URL as it
+            // does not need to be reblogged.
+            let allReblogged = true;
+            for (const imageUrl of imageUrls) {
+                const items = await chrome.storage.local.get(imageUrl);
+                if (imageUrl in items === false) {
+                    allReblogged = false;
+                    break;
+                }
+            }
+            if (allReblogged === true) {
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: postUrl => { console.info(`${postUrl}: Already reblogged.`); },
+                    args: [postUrl]
+                });
+
+                reblogQueue.shift();
+                await chrome.storage.local.set({
+                    reblogQueue: reblogQueue
+                });
+
+                continue;
+            }
+        }
+
+        const postId = /(\d+)$/.exec(postUrl)[1];
+
+        // Extract the account name and reblog key.
+        async function getAccountAndReblogKey () {
+            // First, try to extract the account name and reblog key from the
+            // `links` of the post page.
+            const newTab = await createTab({
+                openerTabId: tabId,
+                url: postUrl,
+                active: false
+            });
+            const result = await executeScript({
+                target: {
+                    tabId: newTab.id
+                },
+                func: postId => {
+                    const reblogHrefPattern = RegExp(`^https://www\\.tumblr\\.com/reblog/([^/]+)/${postId}/(\\w+)`);
+
+                    for (const link of document.links) {
+                        const href = link.href;
+                        const matches = reblogHrefPattern.exec(href);
+                        if (Array.isArray(matches) === true) {
+                            return [matches[1], matches[2]];
+                        }
+                    }
+
+                    function impl(element) {
+                        returnIframeSrc: {
+                            if (typeof element.nodeName !== 'string') {
+                                break returnIframeSrc;
+                            }
+                            const name = element.nodeName.toUpperCase();
+                            if (name !== 'IFRAME') {
+                                break returnIframeSrc;
+                            }
+
+                            const src = element.src;
+                            if (typeof src !== 'string') {
+                                break returnIframeSrc;
+                            }
+
+                            return src;
+                        }
+
+                        const children = element.children;
+                        if (typeof children !== 'object') {
+                            return null;
+                        }
+                        for (const child of children) {
+                            const iframeSrc = impl(child);
+                            if (typeof iframeSrc === 'string') {
+                                return iframeSrc;
+                            }
+                        }
+                        return null;
+                    }
+    
+                    return impl(document);
+                },
+                args: [postId],
+                world: 'MAIN'
+            });
+            chrome.tabs.remove(newTab.id);
+
+            if (Array.isArray(result) === true) {
+                // The account name and reblog key have been extracted from the
+                // `links` of the post page.
+                return result;
+            }
+
+            if (typeof result !== 'string') {
+                const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
+                console.error(errorMessage);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: errorMessage => { console.error(errorMessage); },
+                    args: [errorMessage]
+                });
+                throw new Error(errorMessage);
+            }
+
+            // As a fallback when the account name and reblog key could not be
+            // extracted from the `links` on the post page, try to extract them
+            // from the `iframe` of the post page.
+            const iframeTab = await chrome.tabs.create({
+                openerTabId: tabId,
+                url: result,
+                active: false
+            });
+            const iframeResult = await executeScript({
+                target: {
+                    tabId: iframeTab.id
+                },
+                func: postId => {
+                    const reblogHrefPattern = RegExp(`^https://www\\.tumblr\\.com/reblog/([^/]+)/${postId}/(\\w+)`);
+
+                    for (const link of document.links) {
+                        const href = link.href;
+                        const matches = reblogHrefPattern.exec(href);
+                        if (Array.isArray(matches) === true) {
+                            return [matches[1], matches[2]];
+                        }
+                    }
+
+                    return null;
+                },
+                args: [postId],
+                world: 'MAIN'
+            });
+            chrome.tabs.remove(iframeTab.id);
+
+            if (Array.isArray(iframeResult) === true) {
+                // The account name and reblog key have been extracted from the
+                // `iframe` of the post page.
+                return iframeResult;
+            }
+
+            const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
+            console.error(errorMessage);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: errorMessage => { console.error(errorMessage); },
+                args: [errorMessage]
+            });
+            throw new Error(errorMessage);
+        }
+        const [account, reblogKey] = await getAccountAndReblogKey();
+
+        const newTab = await createTab({
+            openerTabId: tabId,
+            url: `https://www.tumblr.com/reblog/${account}/${postId}/${reblogKey}`,
+            active: true
+        });
+        // Resource loading for the page often takes a long time. In such cases,
+        // `chrome.tabs.remove` gets stuck. To avoid this, the following script
+        // injection sets a time limit on resource loading for the page.
         await executeScript({
             target: {
-                tabId: tabId
+                tabId: newTab.id
             },
             func: () => {
-                nonaltReblog.preflight = true;
+                setTimeout(() => {
+                    window.stop();
+                }, 10 * 1000);
             },
             world: 'MAIN'
         });
+        // Let the script wait for the `Reblog` button to appear.
+        await sleep(6 * 1000);
 
-        chrome.contextMenus.update('togglePreflight', {
-            title: 'Stop preflight'
-        }, () => {});
+        // Search the `Reblog` button and click it.
+        await chrome.scripting.executeScript({
+            target: {
+                tabId: newTab.id,
+                allFrames: true
+            },
+            func: (postId, reblogKey) => {
+                function impl(element) {
+                    checkAndClick: {
+                        if (typeof element.nodeName !== 'string') {
+                            break checkAndClick;
+                        }
+                        const name = element.nodeName.toUpperCase();
+                        if (name !== 'BUTTON') {
+                            break checkAndClick;
+                        }
 
-        chrome.scripting.executeScript({
+                        const innerText = element.innerText;
+                        if (innerText !== 'Reblog') {
+                            break checkAndClick;
+                        }
+
+                        const formAction = element.formAction;
+                        if (formAction !== `https://www.tumblr.com/neue_web/iframe/reblog/${postId}/${reblogKey}`) {
+                            break checkAndClick;
+                        }
+
+                        element.click();
+                        return true;
+                    }
+
+                    if (typeof element.children !== 'object') {
+                        return false;
+                    }
+                    for (const child of element.children) {
+                        const result = impl(child);
+                        if (result === true) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                impl(document);
+            },
+            args: [postId, reblogKey],
+            world: 'MAIN'
+        });
+
+        // If the reblog is successfully committed, the post URL should appear
+        // on my page. The following loop periodically checks it to see if the
+        // reblog was successful.
+        const deadline = Date.now() + 60 * 1000;
+        const myDomain = 'https://cryolite.tumblr.com/'
+        let confirmed = false;
+        while (Date.now() <= deadline) {
+            const response = await fetch(myDomain, {
+                method: 'GET',
+                headers: {
+                    Accept: 'text/html',
+                    'User-Agent': userAgent
+                },
+                credentials: 'include'
+            });
+            if (response.ok === false) {
+                console.warn(`Failed to connect to ${myDomain} (${response.status} ${response.statusText}).`);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: (myDomain, status, statusText) => { console.warn(`Failed to connect to ${myDomain} (${status} ${statusText}).`); },
+                    args: [myDomain, response.status, response.statusText]
+                });
+                continue;
+            }
+
+            const body = await response.text();
+            if (body.indexOf(postUrl) !== -1) {
+                // The post URL certainly appeared on my page. This assures the
+                // reblog has been successfully committed.
+
+                // Record the image URLs in the local storage.
+                for (const imageUrl of imageUrls) {
+                    chrome.storage.local.set({
+                        [imageUrl]: Date.now()
+                    });
+                }
+
+                // When the capacity of the local storage is running low,
+                // recorded image URLs are deleted from the oldest.
+                const usageInBytes = await chrome.storage.local.getBytesInUse(null);
+                if (usageInBytes > chrome.storage.local.QUOTA_BYTES * 0.8) {
+                    const items = await chrome.storage.local.get(null);
+                    const numItems = items.length;
+
+                    const itemsToRemove = Object.entries(items);
+                    itemsToRemove.sort(item => item[1]);
+                    while (itemsToRemove.length > numItems * 0.4) {
+                        itemsToRemove.pop();
+                    }
+                    const keysToRemove = itemsToRemove.map(item => item[0]);
+                    await chrome.storage.local.remove(keysToRemove);
+                }
+
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: postUrl => { console.info(`${postUrl}: Reblogged.`); },
+                    args: [postUrl]
+                });
+
+                reblogQueue.shift();
+                await chrome.storage.local.set({
+                    reblogQueue: reblogQueue
+                });
+                confirmed = true;
+                break;
+            }
+        }
+        chrome.tabs.remove(newTab.id);
+        if (confirmed === true) {
+            continue;
+        }
+
+        console.error(`${postUrl}: Failed to confirm the reblog.`);
+        executeScript({
             target: {
                 tabId: tabId
             },
-            func: () => { nonaltReblog.initiatePreflight(); },
-            world: 'MAIN'
+            func: postUrl => { console.error(`${postUrl}: Failed to confirm the reblog.`); },
+            args: [postUrl]
         });
-
         return;
     }
-
-    await chrome.scripting.executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: () => {
-            nonaltReblog.preflight = false;
-        },
-        world: 'MAIN'
-    });
-
-    chrome.contextMenus.update('togglePreflight', {
-        title: 'Start preflight'
-    }, () => {});
 }
-
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-    const menuItemId = info.menuItemId;
-    if (menuItemId === 'togglePreflight') {
-        const pageUrl = info.pageUrl;
-        if (!URLS.includes(pageUrl)) {
-            console.assert(URLS.includes(pageUrl), pageUrl);
-            return;
-        }
-
-        if ('parentMenuItemId' in info) {
-            console.assert('parentMenuItemId' in info === false);
-            return;
-        }
-
-        const tabId = tab.id;
-        togglePreflight(tabId);
-        return;
-    }
-
-    console.error(`${menuItemId}: An unknown menu item ID.`);
-    return;
-});
 
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     const type = message.type;
@@ -398,35 +751,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
 
-    if (type === 'postprocess') {
-        const userAgent = message.userAgent;
-        if (typeof userAgent !== 'string') {
-            console.assert(typeof userAgent === 'string', typeof userAgent);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: userAgent => { console.assert(typeof userAgent === 'string', typeof userAgent); },
-                args: [userAgent]
-            });
-            sendResponse({
-                errorMessage: null
-            });
-            return false;
-        }
-
+    if (type === 'queueForReblogging') {
         const tabId = message.tabId;
         if (typeof tabId !== 'number') {
             console.assert(typeof tabId !== 'number', typeof tabId);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: tabId => { console.assert(typeof tabId !== 'number', typeof tabId); },
-                args: [tabId]
-            });
             sendResponse({
-                errorMessage: null
+                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`
             });
             return false;
         }
@@ -442,13 +772,13 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
                 args: [postUrl]
             });
             sendResponse({
-                errorMessage: null
+                errorMessage: `${typeof postUrl}: An invalid type.`
             });
             return false;
         }
 
         const imageUrls = message.imageUrls;
-        if (!Array.isArray(imageUrls)) {
+        if (Array.isArray(imageUrls) === false) {
             console.assert(Array.isArray(imageUrls), typeof imageUrls);
             executeScript({
                 target: {
@@ -458,7 +788,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
                 args: [imageUrls]
             });
             sendResponse({
-                errorMessage: null
+                errorMessage: `${typeof imageUrls}: An invalid type.`
             });
             return false;
         }
@@ -473,79 +803,27 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
                     args: [imageUrl]
                 });
                 sendResponse({
-                    errorMessage: null
+                    errorMessage: `${typeof imageUrl}: An invalid type.`
                 });
                 return false;
             }
         }
 
-        (async () => {
-            const deadline = Date.now() + 60 * 1000;
-            const myAccountPattern = /https:\/\/cryolite\.tumblr\.com/;
-            while (Date.now() <= deadline) {
-                const response = await fetch(postUrl, {
-                    method: 'GET',
-                    headers: {
-                        Accept: 'text/html',
-                        'User-Agent': userAgent
-                    },
-                    credentials: 'include'
-                });
-                if (response.ok === false) {
-                    console.warn(`Failed to connect to ${postUrl} (${response.status} ${response.statusText}).`);
-                    executeScript({
-                        target: {
-                            tabId: tabId
-                        },
-                        func: (postUrl, status, statusText) => { console.warn(`Failed to connect to ${postUrl} (${status} ${statusText}).`); },
-                        args: [postUrl, response.status, response.statusText]
-                    });
-                    continue;
-                }
+        queueForReblogging(tabId, postUrl, imageUrls, sendResponse);
+        return true;
+    }
 
-                const body = await response.text();
-                if (body.search(myAccountPattern) !== -1) {
-                    for (const imageUrl of imageUrls) {
-                        chrome.storage.local.set({
-                            [imageUrl]: Date.now()
-                        });
-                    }
-
-                    const usageInBytes = await chrome.storage.local.getBytesInUse(null);
-                    if (usageInBytes > chrome.storage.local.QUOTA_BYTES * 0.8) {
-                        const items = await chrome.storage.local.get(null);
-                        const numItems = items.length;
-
-                        const itemsToRemove = Object.entries(items);
-                        itemsToRemove.sort(item => item[1]);
-                        while (itemsToRemove.length > numItems * 0.4) {
-                            itemsToRemove.pop();
-                        }
-                        const keysToRemove = itemsToRemove.map(item => item[0]);
-                        await chrome.storage.local.remove(keysToRemove);
-                    }
-
-                    executeScript({
-                        target: {
-                            tabId: tabId
-                        },
-                        func: postUrl => { console.info(`${postUrl}: Confirmed the reblog.`); },
-                        args: [postUrl]
-                    });
-                    return;
-                }
-            }
-
-            console.error(`${postUrl}: Failed to confirm the reblog.`);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: postUrl => { console.info(`${postUrl}: Failed to confirm the reblog.`); },
-                args: [postUrl]
+    if (type === 'dequeueForReblogging') {
+        const tabId = message.tabId;
+        if (typeof tabId !== 'number') {
+            console.assert(typeof tabId !== 'number', typeof tabId);
+            sendResponse({
+                errorMessage: `${typeof tabId}: An invalid type.`
             });
-            return;
-        })();
+            return false;
+        }
+
+        dequeueForReblogging(tabId);
         sendResponse({
             errorMessage: null
         });
@@ -598,12 +876,6 @@ async function inject(tabId) {
             args: [tabId, chrome.runtime.id],
             world: 'MAIN'
         });
-
-        chrome.contextMenus.create({
-            documentUrlPatterns: URLS,
-            id: 'togglePreflight',
-            title: 'Start preflight'
-        }, () => {});
     }
 }
 

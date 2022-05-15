@@ -1,6 +1,8 @@
 // In order to avoid name conflicts, all global variables used in this injected
 // script are defined as a property of the object `window.nonaltReblog`.
 if ('nonaltReblog' in window === false) {
+    // The presence of `window.nonaltReblog` determines whether this script has
+    // been already injected into this page or not.
     nonaltReblog = {};
 }
 nonaltReblog.tabId = null;
@@ -14,8 +16,7 @@ nonaltReblog.activeElement = null;
 async function sleep(milliseconds) {
     if (typeof milliseconds !== 'number') {
         console.assert(typeof milliseconds === 'number', typeof milliseconds);
-        const error = new Error(`${typeof milliseconds}: An invalid type.`);
-        throw error;
+        throw new Error(`${typeof milliseconds}: An invalid type.`);
     }
 
     const promise = new Promise((resolve, reject) => {
@@ -47,8 +48,7 @@ nonaltReblog.moveToNextPost = async postElement => {
     if (typeof nextPostElement === 'undefined') {
         const errorMessage = '`postElement.nextElementSibling` is `undefined`.';
         console.error(errorMessage);
-        const error = new Error(errorMessage);
-        throw error;
+        throw new Error(errorMessage);
     }
 
     if (nextPostElement !== null) {
@@ -60,13 +60,15 @@ nonaltReblog.moveToNextPost = async postElement => {
         return nextPostElement;
     }
 
-    const keyboardEvent = new KeyboardEvent('keydown', {
-        bubbles: true,
-        cancelable: true,
-        key: 'j',
-        code: 'KeyJ'
-    });
-    postElement.dispatchEvent(keyboardEvent);
+    {
+        const keyboardEvent = new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'j',
+            code: 'KeyJ'
+        });
+        postElement.dispatchEvent(keyboardEvent);
+    }
 
     while (true) {
         const nextPostElement = postElement.nextElementSibling;
@@ -83,23 +85,23 @@ nonaltReblog.moveToNextPost = async postElement => {
 }
 
 nonaltReblog.getLeftMostPostUrlInInnerHtml = element => {
-    while (true) {
+    matchHrefAgaintPostUrl: {
         if (typeof element.nodeName !== 'string') {
-            break;
+            break matchHrefAgaintPostUrl;
         }
         const name = element.nodeName.toUpperCase();
         if (name !== 'A') {
-            break;
+            break matchHrefAgaintPostUrl;
         }
 
         const href = element.href;
         if (typeof href !== 'string') {
-            break;
+            break matchHrefAgaintPostUrl;
         }
 
         const matches = nonaltReblog.postUrlPattern.exec(href);
         if (!Array.isArray(matches)) {
-            break;
+            break matchHrefAgaintPostUrl;
         }
 
         return matches[1];
@@ -121,22 +123,22 @@ nonaltReblog.getLeftMostPostUrlInInnerHtml = element => {
 
 nonaltReblog.getHrefsInInnerHtml = element => {
     function impl(element, hrefs) {
-        while (true) {
+        matchHrefAgaintPostUrl: {
             if (typeof element.nodeName !== 'string') {
-                break;
+                break matchHrefAgaintPostUrl;
             }
             const name = element.nodeName.toUpperCase();
             if (name !== 'A') {
-                break;
+                break matchHrefAgaintPostUrl;
             }
 
             const href = element.href;
             if (typeof href !== 'string') {
-                break;
+                break matchHrefAgaintPostUrl;
             }
 
             hrefs.push(href);
-            break;
+            break matchHrefAgaintPostUrl;
         }
 
         const children = element.children;
@@ -154,32 +156,11 @@ nonaltReblog.getHrefsInInnerHtml = element => {
 }
 
 nonaltReblog.initiatePreflight = async () => {
-    let element = document.getElementById('tumblr');
-    if (element === null) {
-        const errorMessage = 'Could not find any element with the ID `tumblr`.';
-        console.error(errorMessage);
-        throw new Error(errorMessage);
+    if (nonaltReblog.activeElement === null) {
+        console.error('Press the `J` key (and possibly the `K` key afterwards) to set the starting position of preflight.')
+        return;
     }
-
-    element = await (async () => {
-        const keyboardEvent = new KeyboardEvent('keydown', {
-            bubbles: true,
-            cancelable: true,
-            key: 'j',
-            code: 'KeyJ'
-        });
-
-        let promise = null;
-        const eventListener = event => {
-            promise = new Promise((resolve, reject) => {
-                resolve(event.target);
-            });
-        }
-        element.addEventListener('focusin', eventListener);
-        element.dispatchEvent(keyboardEvent);
-        element.removeEventListener('focusin', eventListener);
-        return promise;
-    })();
+    let element = nonaltReblog.activeElement;
 
     while (nonaltReblog.preflight) {
         const postUrl = nonaltReblog.getLeftMostPostUrlInInnerHtml(element);
@@ -250,14 +231,14 @@ nonaltReblog.initiatePreflight = async () => {
         else if (imageUrls.length === 1) {
             let allDuplicated = true;
             for (const imageUrl of imageUrls) {
-                while (true) {
+                checkForDuplication: {
                     if (imageUrl in nonaltReblog.imageUrlChecks) {
                         if (nonaltReblog.imageUrlChecks[imageUrl] === postUrl) {
                             nonaltReblog.preflight = false;
                             console.assert(nonaltReblog.imageUrlChecks[imageUrl] !== postUrl, postUrl);
                             return;
                         }
-                        break;
+                        break checkForDuplication;
                     }
 
                     nonaltReblog.imageUrlChecks[imageUrl] = postUrl;
@@ -272,11 +253,11 @@ nonaltReblog.initiatePreflight = async () => {
                         throw new Error(result.errorMessage);
                     }
                     if (result.found === true) {
-                        break;
+                        break checkForDuplication;
                     }
 
                     allDuplicated = false;
-                    break;
+                    break checkForDuplication;
                 }
                 if (allDuplicated === false) {
                     break;
@@ -308,87 +289,8 @@ nonaltReblog.initiatePreflight = async () => {
     }
 }
 
-nonaltReblog.reblog = async event => {
-    const target = (() => {
-        const target = event.target;
-        if (typeof target !== 'object') {
-            return null;
-        }
-        const left = target.offsetLeft;
-        if (typeof left !== 'number') {
-            console.assert(typeof left === 'number', typeof left);
-            return null;
-        }
-        const top = target.offsetTop;
-        if (typeof top !== 'number') {
-            console.assert(typeof top === 'number', typeof top);
-            return null;
-        }
-        const width = target.offsetWidth;
-        if (typeof width !== 'number') {
-            console.assert(typeof width === 'number', typeof width);
-            return null;
-        }
-        if (width <= 0) {
-            console.assert(width > 0, width);
-            return null;
-        }
-        const height = target.offsetHeight;
-        if (typeof height !== 'number') {
-            console.assert(typeof height === 'number', typeof height);
-            return null;
-        }
-        if (height > 0) {
-            return target;
-        }
-
-        // When scrolling with the `j` key, an extra `DIV` element with a height
-        // of 0 may be inserted. As a workaround for this phenomenon, if
-        // `event.target` has a height of 0, the `nextElementSibling` is assumed
-        // to be the actual target.
-        const nextTarget = target.nextElementSibling;
-        if (typeof nextTarget !== 'object') {
-            console.assert(typeof nextTarget === 'object', typeof nextTarget);
-            return null;
-        }
-        const nextLeft = nextTarget.offsetLeft;
-        if (typeof nextLeft !== 'number') {
-            console.assert(typeof nextLeft === 'number', typeof nextLeft);
-            return null;
-        }
-        if (nextLeft !== left) {
-            console.assert(nextLeft === left, nextLeft, left);
-            return null;
-        }
-        const nextTop = nextTarget.offsetTop;
-        if (typeof nextTop !== 'number') {
-            console.assert(typeof nextTop === 'number', typeof nextTop);
-            return null;
-        }
-        if (nextTop !== top) {
-            console.assert(nextTop === top, nextTop, top);
-            return null;
-        }
-        const nextWidth = nextTarget.offsetWidth;
-        if (typeof nextWidth !== 'number') {
-            console.assert(typeof nextWidth === 'number', typeof nextWidth);
-            return null;
-        }
-        if (nextWidth !== width) {
-            console.assert(nextWidth === width, nextWidth, width);
-            return null;
-        }
-        const nextHeight = nextTarget.offsetHeight;
-        if (typeof nextHeight !== 'number') {
-            console.assert(typeof nextHeight === 'number', typeof nextHeight);
-            return null;
-        }
-        if (nextHeight <= 0) {
-            console.assert(nextHeight > 0, nextHeight);
-            return null;
-        }
-        return nextTarget;
-    })();
+nonaltReblog.queueForReblogging = async event => {
+    const target = event.target;
     if (target === null) {
         return;
     }
@@ -439,32 +341,8 @@ nonaltReblog.reblog = async event => {
         return;
     }
 
-    console.info(`Synthesize a press of the key \`Alt+r\` on the post ${postUrl}.`);
-    {
-        const keyboardEvent = new KeyboardEvent('keydown', {
-            'bubbles': true,
-            'cancelable': true,
-            'key': 'Alt',
-            'code': 'AltLeft',
-            'location': KeyboardEvent.DOM_KEY_LOCATION_LEFT,
-            'altKey': true
-        });
-        target.dispatchEvent(keyboardEvent);
-    }
-    {
-        const keyboardEvent = new KeyboardEvent('keydown', {
-            'bubbles': true,
-            'cancelable': true,
-            'key': 'r',
-            'code': 'KeyR',
-            'altKey': true
-        });
-        target.dispatchEvent(keyboardEvent);
-    }
-
     nonaltReblog.sendMessageToExtension({
-        type: 'postprocess',
-        userAgent: navigator.userAgent,
+        type: 'queueForReblogging',
         tabId: nonaltReblog.tabId,
         postUrl: postUrl,
         imageUrls: imageUrls
@@ -488,6 +366,9 @@ document.addEventListener('keydown', event => {
         return;
     }
     if (event.sourceCapabilities === null) {
+        return;
+    }
+    if (nonaltReblog.preflight === true) {
         return;
     }
     if (document.activeElement === null) {
@@ -514,6 +395,9 @@ document.addEventListener('keydown', event => {
         return;
     }
     if (event.sourceCapabilities === null) {
+        return;
+    }
+    if (nonaltReblog.preflight === true) {
         return;
     }
     if (document.activeElement === null) {
@@ -547,6 +431,37 @@ document.addEventListener('keydown', async event => {
     if (event.metaKey) {
         return;
     }
+    if (event.code !== 'KeyP') {
+        return;
+    }
+    if (event.sourceCapabilities === null) {
+        return;
+    }
+
+    if (nonaltReblog.preflight === false) {
+        nonaltReblog.preflight = true;
+        nonaltReblog.initiatePreflight().finally(() => {
+            nonaltReblog.preflight = false;
+        });
+        return;
+    }
+
+    nonaltReblog.preflight = false;
+});
+
+document.addEventListener('keydown', async event => {
+    if (event.shiftKey) {
+        return;
+    }
+    if (event.ctrlKey) {
+        return;
+    }
+    if (event.altKey) {
+        return;
+    }
+    if (event.metaKey) {
+        return;
+    }
     if (event.code !== 'KeyR') {
         return;
     }
@@ -557,5 +472,34 @@ document.addEventListener('keydown', async event => {
         return;
     }
 
-    nonaltReblog.reblog(event);
+    nonaltReblog.queueForReblogging(event);
+});
+
+document.addEventListener('keydown', async event => {
+    if (event.shiftKey) {
+        return;
+    }
+    if (event.ctrlKey) {
+        return;
+    }
+    if (event.altKey) {
+        return;
+    }
+    if (event.metaKey) {
+        return;
+    }
+    if (event.code !== 'KeyQ') {
+        return;
+    }
+    if (event.sourceCapabilities === null) {
+        return;
+    }
+    if (nonaltReblog.preflight === true) {
+        return;
+    }
+
+    nonaltReblog.sendMessageToExtension({
+        type: 'dequeueForReblogging',
+        tabId: nonaltReblog.tabId
+    });
 });
