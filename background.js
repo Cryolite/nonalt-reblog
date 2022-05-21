@@ -201,7 +201,7 @@ async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
         },
         world: 'MAIN'
     });
-    await sleep(4 * 1000);
+    await sleep(5 * 1000);
 
     const imageUrls = await executeScript({
         target: {
