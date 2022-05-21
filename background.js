@@ -462,12 +462,12 @@ async function dequeueForReblogging(tabId) {
 
             if (typeof result !== 'string') {
                 const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
-                console.error(errorMessage);
+                console.warn(errorMessage);
                 executeScript({
                     target: {
                         tabId: tabId
                     },
-                    func: errorMessage => { console.error(errorMessage); },
+                    func: errorMessage => { console.warn(errorMessage); },
                     args: [errorMessage]
                 });
                 throw new Error(errorMessage);
@@ -510,6 +510,27 @@ async function dequeueForReblogging(tabId) {
             }
 
             const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
+            console.warn(errorMessage);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: errorMessage => { console.warn(errorMessage); },
+                args: [errorMessage]
+            });
+            throw new Error(errorMessage);
+        }
+        const [account, reblogKey] = await (async () => {
+            // The function `getAccountAndReblogKey` often fails to execute,
+            // so several retries are made.
+            for (let i = 0; i < 3; ++i) {
+                try {
+                    return await getAccountAndReblogKey();
+                } catch (error) {
+                }
+            }
+
+            const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
             console.error(errorMessage);
             executeScript({
                 target: {
@@ -519,8 +540,7 @@ async function dequeueForReblogging(tabId) {
                 args: [errorMessage]
             });
             throw new Error(errorMessage);
-        }
-        const [account, reblogKey] = await getAccountAndReblogKey();
+        })();
 
         const newTab = await createTab({
             openerTabId: tabId,
