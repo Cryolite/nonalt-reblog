@@ -2,6 +2,8 @@ const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
 
+const fetchImagesResponse = {};
+
 async function sleep(milliseconds) {
     if (typeof milliseconds !== 'number') {
         console.assert(typeof milliseconds === 'number', typeof milliseconds);
@@ -57,6 +59,137 @@ async function executeScript(scriptInjection) {
     return injectionResult.result;
 }
 
+async function fetchImages(tabId, imageUrls) {
+    const id = crypto.randomUUID();
+
+    const impl = () => {
+        return executeScript({
+            target: {
+                tabId: tabId
+            },
+            func: (extensionId, imageUrls, id) => {
+                const URL_PREFIX_TO_FETCH = [
+                    ['https://i.pximg.net/', url => fetch('http://localhost:5000/proxy_to_pixiv', {
+                        method: 'POST',
+                        headers: {
+                            Accept: 'image/*'
+                        },
+                        body: url
+                    })],
+                    ['https://pbs.twimg.com/', url => fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            Accept: 'image/*'
+                        }
+                    })]
+                ];
+
+                const mimeList = [];
+                let error = null;
+
+                const imageResponsePromises = [];
+                for (const imageUrl of imageUrls) {
+                    try {
+                        const imageResponsePromise = (() => {
+                            for (const [urlPrefix, fetchImpl] of URL_PREFIX_TO_FETCH) {
+                                if (imageUrl.startsWith(urlPrefix)) {
+                                    return fetchImpl(imageUrl);
+                                }
+                            }
+                            return null;
+                        })();
+                        if (imageResponsePromise === null) {
+                            throw new Error(`${imageUrl}: An unsupported URL.`);
+                        }
+                        imageResponsePromises.push(imageResponsePromise);
+                    } catch (e) {
+                        return e;
+                    }
+                }
+                Promise.all(imageResponsePromises).then(imageResponses => {
+                    const blobPromises = [];
+                    for (const response of imageResponses) {
+                        if (response.ok !== true) {
+                            throw new Error(`${response.url}: Failed to fetch (${response.status}).`);
+                        }
+                        const mime = response.headers.get('Content-Type');
+                        mimeList.push(mime);
+                        const blobPromise = response.blob();
+                        blobPromises.push(blobPromise);
+                    }
+                    return Promise.all(blobPromises);
+                }).then(blobList => {
+                    async function blobToBase64(blob) {
+                        return new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.addEventListener('load', () => {
+                                const base64String = reader.result.replace(/^[^,]+,/, '');
+                                resolve(base64String);
+                            });
+                            reader.addEventListener('error', () => {
+                                reject(new Error('Failed to encode a blob into the base64-encoded string.'));
+                            });
+                            reader.readAsDataURL(blob);
+                        });
+                    }
+
+                    const base64StringPromises = [];
+                    for (const blob of blobList) {
+                        const base64StringPromise = blobToBase64(blob);
+                        base64StringPromises.push(base64StringPromise);
+                    }
+                    return Promise.all(base64StringPromises);
+                }).then(base64StringList => {
+                    const images = [];
+                    for (let i = 0; i < imageUrls.length; ++i) {
+                        images.push({
+                            url: imageUrls[i],
+                            mime: mimeList[i],
+                            blob: base64StringList[i]
+                        });
+                    }
+                    chrome.runtime.sendMessage(extensionId, {
+                        type: 'respondFetchImages',
+                        id: id,
+                        images: images
+                    });
+                }).catch(e => {
+                    console.error(e);
+                    error = e;
+                });
+
+                return error;
+            },
+            args: [chrome.runtime.id, imageUrls, id],
+            world: 'MAIN'
+        });
+    }
+
+    const deadline = Date.now() + 30 * 1000;
+    let error = null;
+    for (let i = 0; i < 5; ++i) {
+        error = await impl();
+        if (error !== null) {
+            console.warn(error);
+            continue;
+        }
+    }
+    if (error !== null) {
+        throw error;
+    }
+
+    while (id in fetchImagesResponse !== true && Date.now() <= deadline) {
+        await sleep(100);
+    }
+    if (id in fetchImagesResponse !== true) {
+        throw new Error('Timeout in `fetchImages`.');
+    }
+
+    const images = fetchImagesResponse[id];
+    delete fetchImagesResponse[id];
+    return images;
+}
+
 async function expandPixivArtworks(tabId) {
     await executeScript({
         target: {
@@ -87,6 +220,10 @@ async function expandPixivArtworks(tabId) {
                     return;
                 }
 
+                const children = element.children;
+                if (typeof children !== 'object') {
+                    return;
+                }
                 for (const child of children) {
                     expandImpl(child);
                 }
@@ -98,7 +235,7 @@ async function expandPixivArtworks(tabId) {
     });
 }
 
-async function getPixivImageUrlsImpl(tabId, sourceUrl, imageUrls) {
+async function getPixivImagesImpl(tabId, sourceUrl, images) {
     const newTab = await createTab({
         openerTabId: tabId,
         url: sourceUrl,
@@ -137,18 +274,25 @@ async function getPixivImageUrlsImpl(tabId, sourceUrl, imageUrls) {
         world: 'MAIN'
     });
 
-    chrome.tabs.remove(newTab.id);
-
     const imageUrlPattern = /^https:\/\/i\.pximg\.net\/img-original\/img\/\d{4}(?:\/\d{2}){5}\/\d+_p0\.\w+/;
+    const imageUrls = [];
     for (const imageUrl of linkUrls) {
         if (imageUrl.search(imageUrlPattern) === -1) {
             continue;
         }
         imageUrls.push(imageUrl);
     }
+
+    const imageUrlsUniqued = [...new Set(imageUrls)];
+    const newImages = await fetchImages(newTab.id, imageUrlsUniqued);
+    for (const newImage of newImages) {
+        images.push(newImage);
+    }
+
+    chrome.tabs.remove(newTab.id);
 }
 
-async function getPixivImageUrls(tabId, hrefs, innerText) {
+async function getPixivImages(tabId, hrefs, innerText) {
     const sourceUrls = [];
     {
         const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/www\.pixiv\.net)(?:\/en)?(\/artworks\/\d+)/;
@@ -171,14 +315,14 @@ async function getPixivImageUrls(tabId, hrefs, innerText) {
         }
     }
 
-    const imageUrls = [];
+    const images = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getPixivImageUrlsImpl(tabId, sourceUrl, imageUrls);
+        await getPixivImagesImpl(tabId, sourceUrl, images);
     }
-    return [...new Set(imageUrls)];
+    return images;
 }
 
-async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
+async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     // To retrieve the URL of the original images from a Twitter tweet URL, open
     // the tweet page in the foreground, wait a few seconds, and extract the
     // URLs from the `images`.
@@ -219,10 +363,9 @@ async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
         world: 'MAIN'
     });
 
-    chrome.tabs.remove(newTab.id);
-
     const imageUrlPattern = /^(https:\/\/pbs\.twimg\.com\/media\/[^\?]+\?format=[^&]+)&name=.+/;
     const imageUrlReplacement = '$1&name=orig';
+    const originalImageUrls = [];
     for (const imageUrl of imageUrls) {
         if (imageUrl.search(imageUrlPattern) === -1) {
             continue;
@@ -230,9 +373,17 @@ async function getTwitterImageUrlsImpl(tabId, sourceUrl, originalImageUrls) {
         const originalImageUrl = imageUrl.replace(imageUrlPattern, imageUrlReplacement);
         originalImageUrls.push(originalImageUrl);
     }
+
+    const originalImageUrlsUniqued = [...new Set(originalImageUrls)];
+    const newImages = await fetchImages(newTab.id, originalImageUrlsUniqued);
+    for (const newImage of newImages) {
+        images.push(newImage);
+    }
+
+    chrome.tabs.remove(newTab.id);
 }
 
-async function getTwitterImageUrls(tabId, hrefs, innerText) {
+async function getTwitterImages(tabId, hrefs, innerText) {
     const sourceUrls = [];
     {
         const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
@@ -252,32 +403,32 @@ async function getTwitterImageUrls(tabId, hrefs, innerText) {
         }
     }
 
-    const imageUrls = [];
+    const images = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getTwitterImageUrlsImpl(tabId, sourceUrl, imageUrls);
+        await getTwitterImagesImpl(tabId, sourceUrl, images);
     }
-    return [...new Set(imageUrls)];
+    return images;
 }
 
-const imageUrlsGetters = [
-    getPixivImageUrls,
-    getTwitterImageUrls
-]
+const imagesGetters = [
+    getPixivImages,
+    getTwitterImages
+];
 
-async function getImageUrls(tabId, hrefs, innerText, sendResponse) {
-    for (const imageUrlsGetter of imageUrlsGetters) {
-        const imageUrls = await imageUrlsGetter(tabId, hrefs, innerText);
-        if (imageUrls.length >= 1) {
+async function getImages(tabId, hrefs, innerText, sendResponse) {
+    for (const imagesGetter of imagesGetters) {
+        const images = await imagesGetter(tabId, hrefs, innerText);
+        if (images.length >= 1) {
             sendResponse({
                 errorMessage: null,
-                imageUrls: imageUrls
+                images: images
             });
             return;
         }
     }
     sendResponse({
         errorMessage: null,
-        imageUrls: []
+        images: []
     });
 }
 
@@ -523,12 +674,17 @@ async function dequeueForReblogging(tabId) {
         const [account, reblogKey] = await (async () => {
             // The function `getAccountAndReblogKey` often fails to execute,
             // so several retries are made.
-            for (let i = 0; i < 3; ++i) {
+            for (let i = 0; i < 5; ++i) {
                 try {
                     return await getAccountAndReblogKey();
                 } catch (error) {
                 }
             }
+
+            reblogQueue.shift();
+            await chrome.storage.local.set({
+                reblogQueue: reblogQueue
+            });
 
             const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
             console.error(errorMessage);
@@ -730,7 +886,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
 
-    if (type === 'getImageUrls') {
+    if (type === 'getImages') {
         const tabId = message.tabId;
         if (typeof tabId !== 'number') {
             console.assert(typeof tabId === 'number', typeof tabId);
@@ -767,8 +923,59 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
             return false;
         }
 
-        getImageUrls(tabId, hrefs, innerText, sendResponse);
+        getImages(tabId, hrefs, innerText, sendResponse);
         return true;
+    }
+
+    if (type === 'respondFetchImages') {
+        const images = message.images;
+        if (Array.isArray(images) !== true) {
+            console.assert(Array.isArray(images), typeof images);
+            sendResponse({
+                errorMessage: `${typeof images}: An invalid type for \`message.images\`.`
+            });
+            return false;
+        }
+        const id = message.id;
+        if (typeof id !== 'string') {
+            console.assert(typeof id === 'string', typeof id);
+            sendResponse({
+                errorMessage: `${typeof id}: An invalid type for \`id\`.`
+            });
+            return false;
+        }
+        for (const image of images) {
+            const url = image.url;
+            if (typeof url !== 'string') {
+                console.assert(typeof url === 'string', typeof url);
+                sendResponse({
+                    errorMessage: `${typeof url}: An invalid type for \`url\`.`
+                });
+                return false;
+            }
+            const mime = image.mime;
+            if (typeof mime !== 'string') {
+                console.assert(typeof mime === 'string', typeof mime);
+                sendResponse({
+                    errorMessage: `${typeof mime}: An invalid type for \`mime\`.`
+                });
+                return false;
+            }
+            const blob = image.blob;
+            if (typeof blob !== 'string') {
+                console.assert(typeof blob === 'string', typeof blob);
+                sendResponse({
+                    errorMessage: `${typeof blob}: An invalid type for \`blob\`.`
+                });
+                return false;
+            }
+        }
+
+        fetchImagesResponse[id] = images;
+        sendResponse({
+            errorMessage: null
+        });
+        return false;
     }
 
     if (type === 'queueForReblogging') {
