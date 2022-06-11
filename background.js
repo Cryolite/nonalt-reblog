@@ -1,23 +1,10 @@
+import { sleep } from "./common.js";
+
 const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
 
 const fetchImagesResponse = {};
-
-async function sleep(milliseconds) {
-    if (typeof milliseconds !== 'number') {
-        console.assert(typeof milliseconds === 'number', typeof milliseconds);
-        const error = new Error(`${typeof milliseconds}: An invalid type.`);
-        throw error;
-    }
-
-    const promise = new Promise((resolve, reject) => {
-        setTimeout(() => {
-            resolve();
-        }, milliseconds);
-    });
-    return promise;
-}
 
 // Create a new tab and wait for the resource loading for the page on that tab
 // to complete.
@@ -904,7 +891,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
             });
             return false;
         }
-        for (href of hrefs) {
+        for (const href of hrefs) {
             if (typeof href !== 'string') {
                 console.assert(typeof href === 'string', typeof href);
                 sendResponse({
@@ -1081,26 +1068,25 @@ async function inject(tabId) {
         world: 'MAIN'
     });
 
-    if (!injected) {
+    if (injected !== true) {
         await executeScript({
             target: {
                 tabId: tabId
             },
-            files: [
-                'injection.js'
-            ],
-            world: 'MAIN'
-        });
-
-        await chrome.scripting.executeScript({
-            target: {
-                tabId: tabId
+            func: (scriptUrl, tabId, extensionId) => {
+                const scriptElement = document.createElement('script');
+                scriptElement.addEventListener('load', () => {
+                    nonaltReblog.tabId = tabId;
+                    nonaltReblog.extensionId = extensionId;
+                });
+                scriptElement.addEventListener('error', () => {
+                    console.error(`Failed to load \`${scriptUrl}\`.`);
+                });
+                scriptElement.type = 'module';
+                scriptElement.src = scriptUrl;
+                document.head.append(scriptElement);
             },
-            func: (tabId, extensionId) => {
-                nonaltReblog.tabId = tabId;
-                nonaltReblog.extensionId = extensionId;
-            },
-            args: [tabId, chrome.runtime.id],
+            args: [chrome.runtime.getURL('injection.js'), tabId, chrome.runtime.id],
             world: 'MAIN'
         });
     }

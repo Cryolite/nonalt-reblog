@@ -3,7 +3,7 @@
 if ('nonaltReblog' in window === false) {
     // The presence of `window.nonaltReblog` determines whether this script has
     // been already injected into this page or not.
-    nonaltReblog = {};
+    window.nonaltReblog = {};
 }
 nonaltReblog.tabId = null;
 nonaltReblog.extensionId = null;
@@ -13,19 +13,7 @@ nonaltReblog.imageUrlChecks = {};
 nonaltReblog.postUrlToImageUrls = {};
 nonaltReblog.activeElement = null;
 
-async function sleep(milliseconds) {
-    if (typeof milliseconds !== 'number') {
-        console.assert(typeof milliseconds === 'number', typeof milliseconds);
-        throw new Error(`${typeof milliseconds}: An invalid type.`);
-    }
-
-    const promise = new Promise((resolve, reject) => {
-        setTimeout(() => {
-            resolve();
-        }, milliseconds);
-    });
-    return promise;
-}
+import { sleep } from "chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js";
 
 nonaltReblog.sendMessageToExtension = message => {
     const promise = new Promise((resolve, reject) => {
@@ -178,7 +166,7 @@ nonaltReblog.getPostImageUrls = element => {
                 let maxWidth = 0;
                 let imageUrl = null;
                 for (const src of srcs) {
-                    matches = srcPattern.exec(src.trim());
+                    const matches = srcPattern.exec(src.trim());
                     if (matches === null) {
                         continue;
                     }
