@@ -1,10 +1,8 @@
-import { sleep } from "./common.js";
+import { sleep, fetchImages } from "./common.js";
 
 const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
-
-const fetchImagesResponse = {};
 
 // Create a new tab and wait for the resource loading for the page on that tab
 // to complete.
@@ -44,137 +42,6 @@ async function executeScript(scriptInjection) {
     }
     const injectionResult = injectionResults[0];
     return injectionResult.result;
-}
-
-async function fetchImages(tabId, imageUrls) {
-    const id = crypto.randomUUID();
-
-    const impl = () => {
-        return executeScript({
-            target: {
-                tabId: tabId
-            },
-            func: (extensionId, imageUrls, id) => {
-                const URL_PREFIX_TO_FETCH = [
-                    ['https://i.pximg.net/', url => fetch('http://localhost:5000/proxy_to_pixiv', {
-                        method: 'POST',
-                        headers: {
-                            Accept: 'image/*'
-                        },
-                        body: url
-                    })],
-                    ['https://pbs.twimg.com/', url => fetch(url, {
-                        method: 'GET',
-                        headers: {
-                            Accept: 'image/*'
-                        }
-                    })]
-                ];
-
-                const mimeList = [];
-                let error = null;
-
-                const imageResponsePromises = [];
-                for (const imageUrl of imageUrls) {
-                    try {
-                        const imageResponsePromise = (() => {
-                            for (const [urlPrefix, fetchImpl] of URL_PREFIX_TO_FETCH) {
-                                if (imageUrl.startsWith(urlPrefix)) {
-                                    return fetchImpl(imageUrl);
-                                }
-                            }
-                            return null;
-                        })();
-                        if (imageResponsePromise === null) {
-                            throw new Error(`${imageUrl}: An unsupported URL.`);
-                        }
-                        imageResponsePromises.push(imageResponsePromise);
-                    } catch (e) {
-                        return e;
-                    }
-                }
-                Promise.all(imageResponsePromises).then(imageResponses => {
-                    const blobPromises = [];
-                    for (const response of imageResponses) {
-                        if (response.ok !== true) {
-                            throw new Error(`${response.url}: Failed to fetch (${response.status}).`);
-                        }
-                        const mime = response.headers.get('Content-Type');
-                        mimeList.push(mime);
-                        const blobPromise = response.blob();
-                        blobPromises.push(blobPromise);
-                    }
-                    return Promise.all(blobPromises);
-                }).then(blobList => {
-                    async function blobToBase64(blob) {
-                        return new Promise((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.addEventListener('load', () => {
-                                const base64String = reader.result.replace(/^[^,]+,/, '');
-                                resolve(base64String);
-                            });
-                            reader.addEventListener('error', () => {
-                                reject(new Error('Failed to encode a blob into the base64-encoded string.'));
-                            });
-                            reader.readAsDataURL(blob);
-                        });
-                    }
-
-                    const base64StringPromises = [];
-                    for (const blob of blobList) {
-                        const base64StringPromise = blobToBase64(blob);
-                        base64StringPromises.push(base64StringPromise);
-                    }
-                    return Promise.all(base64StringPromises);
-                }).then(base64StringList => {
-                    const images = [];
-                    for (let i = 0; i < imageUrls.length; ++i) {
-                        images.push({
-                            url: imageUrls[i],
-                            mime: mimeList[i],
-                            blob: base64StringList[i]
-                        });
-                    }
-                    chrome.runtime.sendMessage(extensionId, {
-                        type: 'respondFetchImages',
-                        id: id,
-                        images: images
-                    });
-                }).catch(e => {
-                    console.error(e);
-                    error = e;
-                });
-
-                return error;
-            },
-            args: [chrome.runtime.id, imageUrls, id],
-            world: 'MAIN'
-        });
-    }
-
-    const deadline = Date.now() + 30 * 1000;
-    let error = null;
-    for (let i = 0; i < 5; ++i) {
-        error = await impl();
-        if (error !== null) {
-            console.warn(error);
-            continue;
-        }
-    }
-    if (error !== null) {
-        throw error;
-    }
-
-    while (id in fetchImagesResponse !== true && Date.now() <= deadline) {
-        await sleep(100);
-    }
-    if (id in fetchImagesResponse !== true) {
-        throw new Error('Timeout in `fetchImages`.');
-    }
-
-    const images = fetchImagesResponse[id];
-    delete fetchImagesResponse[id];
-    return images;
 }
 
 async function expandPixivArtworks(tabId) {
@@ -271,7 +138,7 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
     }
 
     const imageUrlsUniqued = [...new Set(imageUrls)];
-    const newImages = await fetchImages(newTab.id, imageUrlsUniqued);
+    const newImages = await fetchImages(imageUrlsUniqued, sourceUrl);
     for (const newImage of newImages) {
         images.push(newImage);
     }
@@ -362,7 +229,7 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     }
 
     const originalImageUrlsUniqued = [...new Set(originalImageUrls)];
-    const newImages = await fetchImages(newTab.id, originalImageUrlsUniqued);
+    const newImages = await fetchImages(originalImageUrlsUniqued, sourceUrl);
     for (const newImage of newImages) {
         images.push(newImage);
     }
@@ -912,57 +779,6 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
         getImages(tabId, hrefs, innerText, sendResponse);
         return true;
-    }
-
-    if (type === 'respondFetchImages') {
-        const images = message.images;
-        if (Array.isArray(images) !== true) {
-            console.assert(Array.isArray(images), typeof images);
-            sendResponse({
-                errorMessage: `${typeof images}: An invalid type for \`message.images\`.`
-            });
-            return false;
-        }
-        const id = message.id;
-        if (typeof id !== 'string') {
-            console.assert(typeof id === 'string', typeof id);
-            sendResponse({
-                errorMessage: `${typeof id}: An invalid type for \`id\`.`
-            });
-            return false;
-        }
-        for (const image of images) {
-            const url = image.url;
-            if (typeof url !== 'string') {
-                console.assert(typeof url === 'string', typeof url);
-                sendResponse({
-                    errorMessage: `${typeof url}: An invalid type for \`url\`.`
-                });
-                return false;
-            }
-            const mime = image.mime;
-            if (typeof mime !== 'string') {
-                console.assert(typeof mime === 'string', typeof mime);
-                sendResponse({
-                    errorMessage: `${typeof mime}: An invalid type for \`mime\`.`
-                });
-                return false;
-            }
-            const blob = image.blob;
-            if (typeof blob !== 'string') {
-                console.assert(typeof blob === 'string', typeof blob);
-                sendResponse({
-                    errorMessage: `${typeof blob}: An invalid type for \`blob\`.`
-                });
-                return false;
-            }
-        }
-
-        fetchImagesResponse[id] = images;
-        sendResponse({
-            errorMessage: null
-        });
-        return false;
     }
 
     if (type === 'queueForReblogging') {

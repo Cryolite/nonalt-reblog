@@ -13,7 +13,9 @@ nonaltReblog.imageUrlChecks = {};
 nonaltReblog.postUrlToImageUrls = {};
 nonaltReblog.activeElement = null;
 
-import { sleep } from "chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js";
+import {
+    sleep, fetchImages
+} from "chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js";
 
 nonaltReblog.sendMessageToExtension = message => {
     const promise = new Promise((resolve, reject) => {
@@ -197,66 +199,7 @@ nonaltReblog.getPostImageUrls = element => {
 }
 
 nonaltReblog.matchImages = async (postUrl, postImageUrls, images) => {
-    const postImageResponses = await (() => {
-        const postImageResponses = [];
-        for (const postImageUrl of postImageUrls) {
-            const postImageResponse = fetch(postImageUrl, {
-                method: 'GET',
-                headers: {
-                    Accept: 'image/*'
-                }
-            });
-            postImageResponses.push(postImageResponse);
-        }
-        return Promise.all(postImageResponses);
-    })();
-
-    const [blobList, mimeList] = await (async () => {
-        const blobPromises = [];
-        const mimeList = [];
-        for (const response of postImageResponses) {
-            if (response.ok !== true) {
-                throw new Error(`${response.url}: Failed to fetch (${response.status}).`);
-            }
-            const blobPromise = response.blob();
-            blobPromises.push(blobPromise);
-            const mime = response.headers.get('Content-Type');
-            mimeList.push(mime);
-        }
-        return [await Promise.all(blobPromises), mimeList];
-    })();
-
-    const postImages = [];
-    {
-        async function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.addEventListener('load', () => {
-                    const base64String = reader.result.replace(/^[^,]+,/, '');
-                    resolve(base64String);
-                });
-                reader.addEventListener('error', () => {
-                    reject(new Error('Failed to encode a blob into the base64-encoded string.'));
-                });
-                reader.readAsDataURL(blob);
-            });
-        }
-
-        const base64StringPromises = [];
-        for (const blob of blobList) {
-            const base64StringPromise = blobToBase64(blob);
-            base64StringPromises.push(base64StringPromise);
-        }
-        const base64Strings = await Promise.all(base64StringPromises);
-
-        for (let i = 0; i < postImageUrls.length; ++i) {
-            postImages.push({
-                url: postImageUrls[i],
-                mime: mimeList[i],
-                blob: base64Strings[i]
-            });
-        }
-    }
+    const postImages = await fetchImages(postImageUrls, postUrl);
 
     const requestBody = {
         sources: postImages,

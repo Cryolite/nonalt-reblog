@@ -3,6 +3,7 @@ import io
 import logging
 from base64 import b64decode
 from typing import Optional
+import jsonschema
 import requests
 import numpy
 from PIL import Image
@@ -21,9 +22,10 @@ cors = flask_cors.CORS(app, resources={
         'methods': ['POST'],
         'allow_headers': ['Content-Type']
     },
-    r'/proxy_to_pixiv': {
-        'origins': ['https://www.pixiv.net'],
-        'methods': ['POST']
+    r'/proxy-to-pixiv': {
+        'origins': [f'chrome-extension://{_EXTENSION_ID}'],
+        'methods': ['POST'],
+        'allow_headers': ['Content-Type']
     }
 })
 
@@ -124,7 +126,6 @@ def match():
         return f'`{flask.request.mimetype}` is not an allowed mimetype.', 400
 
     data = flask.request.json
-    import jsonschema
     from jsonschema.exceptions import (SchemaError, ValidationError,)
     try:
         jsonschema.validate(data, _REQUEST_JSON_SCHEMA)
@@ -166,26 +167,54 @@ def match():
     return flask.jsonify(response)
 
 
-@app.route('/proxy_to_pixiv', methods=('POST',))
+_PROXY_TO_PIXIV_REQUEST_SCHEMA = {
+    'type': 'object',
+    'required': [
+        'url',
+        'referrer'
+    ],
+    'properties': {
+        'url': {
+            'type': 'string'
+        },
+        'referrer': {
+            'type': 'string'
+        }
+    },
+    'additionalProperties': False
+}
+
+
+@app.route('/proxy-to-pixiv', methods=('POST',))
 def proxy():
     if flask.request.method != 'POST':
         return f'`{flask.request.method}` is not allowed.', 405
 
-    if flask.request.mimetype != 'text/plain':
+    if flask.request.mimetype != 'application/json':
         return f'`{flask.request.mimetype}` is not an allowed mimetype.', 400
 
-    url = flask.request.data.decode('UTF-8')
+    data = flask.request.json
+    from jsonschema.exceptions import (SchemaError, ValidationError,)
+    try:
+        jsonschema.validate(data, _PROXY_TO_PIXIV_REQUEST_SCHEMA)
+    except SchemaError as e:
+        logging.exception(e)
+        return e.message, 500
+    except ValidationError as e:
+        logging.exception(e)
+        return e.message, 400
+
     new_headers = dict(flask.request.headers)
     del new_headers['Host']
     del new_headers['Content-Type']
     del new_headers['Content-Length']
     new_headers['Authority'] = 'i.pximg.net'
-    new_headers['Referer'] = 'https://www.pixiv.net/'
+    new_headers['Referer'] = data['referrer']
     new_headers['Sec-Fetch-Mode'] = 'navigate'
     new_headers['Sec-Fetch-User'] = '?1'
     new_headers['Sec-Fetch-Dest'] = 'document'
     logging.error(new_headers)
-    r = requests.get(url, headers=new_headers)
+    r = requests.get(data['url'], headers=new_headers)
 
     return flask.Response(
         r.content, status=r.status_code, content_type=r.headers['Content-Type'])

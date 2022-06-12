@@ -25,9 +25,7 @@
     ],
     "externally_connectable": {
         "matches": [
-            "https://www.tumblr.com/dashboard",
-            "https://twitter.com/*",
-            "https://www.pixiv.net/artworks/*"
+            "https://www.tumblr.com/dashboard"
         ]
     }
 }
