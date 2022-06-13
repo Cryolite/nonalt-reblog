@@ -176,6 +176,25 @@ async function getPixivImages(tabId, hrefs, innerText) {
     return images;
 }
 
+async function followTwitterShortUrl(url) {
+    if (/^https:\/\/t\.co\/[0-9A-Za-z]+$/.test(url) !== true) {
+        throw new Error(`${url}: An invalid URL.`);
+    }
+
+    const response = await fetch(url);
+    if (response.ok !== true) {
+        throw new Error(`${url}: Failed to fetch (${url.status}).`);
+    }
+
+    const responseBody = await response.text();
+    const sourceUrlPattern = /(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
+    const match = sourceUrlPattern.exec(responseBody);
+    if (Array.isArray(match) !== true) {
+        return null;
+    }
+    return match[1];
+}
+
 async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     // To retrieve the URL of the original images from a Twitter tweet URL, open
     // the tweet page in the foreground, wait a few seconds, and extract the
@@ -243,17 +262,39 @@ async function getTwitterImages(tabId, hrefs, innerText) {
         const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
         for (const href of hrefs) {
             const matches = sourceUrlPattern.exec(href);
-            if (!Array.isArray(matches)) {
+            if (Array.isArray(matches) !== true) {
                 continue;
             }
             sourceUrls.push(matches[1]);
         }
     }
     {
+        const shortUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/t\.co\/[0-9A-Za-z]+)/;
+        for (const href of hrefs) {
+            const shortMatches = shortUrlPattern.exec(href);
+            if (Array.isArray(shortMatches) === true) {
+                const sourceUrl = await followTwitterShortUrl(shortMatches[1]);
+                if (typeof sourceUrl === 'string') {
+                    sourceUrls.push(sourceUrl);
+                }
+            }
+        }
+    }
+    {
         const sourceUrlPattern = /(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
         const matches = sourceUrlPattern.exec(innerText);
-        if (Array.isArray(matches)) {
+        if (Array.isArray(matches) === true) {
             sourceUrls.push(matches[1]);
+        }
+    }
+    {
+        const shortUrlPattern = /(https:\/\/t\.co\/[0-9A-Za-z]+)/;
+        const shortMatches = shortUrlPattern.exec(innerText);
+        if (Array.isArray(shortMatches) === true) {
+            const sourceUrl = await followTwitterShortUrl(shortMatches[1]);
+            if (typeof sourceUrl === 'string') {
+                sourceUrls.push(sourceUrl);
+            }
         }
     }
 
