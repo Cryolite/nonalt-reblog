@@ -762,6 +762,36 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return false;
     }
 
+    if (type === 'findInReblogQueue') {
+        const key = message.key;
+        if (typeof key !== 'string') {
+            console.assert(typeof key === 'string', typeof key);
+            sendResponse({
+                errorMessage: `${typeof key}: An invalid type.`
+            });
+            return false;
+        }
+
+        (async () => {
+            const items = await chrome.storage.local.get('reblogQueue');
+            if ('reblogQueue' in items !== true) {
+                sendResponse({
+                    errorMessage: null,
+                    found: false
+                });
+                return;
+            }
+            const reblogQueue = items.reblogQueue;
+
+            sendResponse({
+                errorMessage: null,
+                found: reblogQueue.map(x => x.imageUrls).flat().includes(key)
+            });
+        })();
+
+        return true;
+    }
+
     if (type === 'findInLocalStorage') {
         const key = message.key;
         if (typeof key !== 'string') {

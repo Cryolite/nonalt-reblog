@@ -380,22 +380,42 @@ nonaltReblog.initiatePreflight = async () => {
                         console.assert(nonaltReblog.imageUrlChecks[imageUrl] !== postUrl, postUrl, imageUrl);
                         return;
                     }
+                    console.info(`${imageUrl}: Already detected in the dashboard.`);
                     break checkForDuplication;
                 }
 
                 nonaltReblog.imageUrlChecks[imageUrl] = postUrl;
 
-                const result = await nonaltReblog.sendMessageToExtension({
-                    type: 'findInLocalStorage',
-                    key: imageUrl
-                });
-                if (result.errorMessage !== null) {
-                    nonaltReblog.preflight = false;
-                    console.error(result.errorMessage);
-                    throw new Error(result.errorMessage);
+                {
+                    const result = await nonaltReblog.sendMessageToExtension({
+                        type: 'findInReblogQueue',
+                        key: imageUrl
+                    });
+                    if (result.errorMessage !== null) {
+                        nonaltReblog.preflight = false;
+                        console.error(result.errorMessage);
+                        throw new Error(result.errorMessage);
+                    }
+                    if (result.found === true) {
+                        console.info(`${imageUrl}: Already queued to be reblogged.`);
+                        break checkForDuplication;
+                    }
                 }
-                if (result.found === true) {
-                    break checkForDuplication;
+
+                {
+                    const result = await nonaltReblog.sendMessageToExtension({
+                        type: 'findInLocalStorage',
+                        key: imageUrl
+                    });
+                    if (result.errorMessage !== null) {
+                        nonaltReblog.preflight = false;
+                        console.error(result.errorMessage);
+                        throw new Error(result.errorMessage);
+                    }
+                    if (result.found === true) {
+                        console.info(`${imageUrl}: Already reblogged.`);
+                        break checkForDuplication;
+                    }
                 }
 
                 allDuplicated = false;
@@ -406,12 +426,7 @@ nonaltReblog.initiatePreflight = async () => {
             }
         }
         if (allDuplicated === true) {
-            if (matchedImageUrls.length === 1) {
-                console.info(`${postUrl}: Removed because the image has been already detected in the dashboard or reblogged.`);
-            }
-            else {
-                console.info(`${postUrl}: Removed because all the images have been already detected in the dashboard or reblogged.`);
-            }
+            console.info(`  ${postUrl}: Removed.`);
             const nextElement = await nonaltReblog.moveToNextPost(element);
             element.remove();
             element = nextElement;
