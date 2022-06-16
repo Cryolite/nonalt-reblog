@@ -281,17 +281,17 @@ async function getTwitterImages(tabId, hrefs, innerText) {
         }
     }
     {
-        const sourceUrlPattern = /(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
-        const matches = sourceUrlPattern.exec(innerText);
-        if (Array.isArray(matches) === true) {
-            sourceUrls.push(matches[1]);
+        const sourceUrlPattern = /https:\/\/twitter\.com\/[^\/]+\/status\/\d+/g;
+        const matches = innerText.matchAll(sourceUrlPattern);
+        for (const match of matches) {
+            sourceUrls.push(match[0]);
         }
     }
     {
-        const shortUrlPattern = /(https:\/\/t\.co\/[0-9A-Za-z]+)/;
-        const shortMatches = shortUrlPattern.exec(innerText);
-        if (Array.isArray(shortMatches) === true) {
-            const sourceUrl = await followTwitterShortUrl(shortMatches[1]);
+        const shortUrlPattern = /https:\/\/t\.co\/[0-9A-Za-z]+/g;
+        const shortMatches = innerText.matchAll(shortUrlPattern);
+        for (const shortMatch of shortMatches) {
+            const sourceUrl = await followTwitterShortUrl(shortMatch[0]);
             if (typeof sourceUrl === 'string') {
                 sourceUrls.push(sourceUrl);
             }
