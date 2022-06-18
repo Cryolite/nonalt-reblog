@@ -10,7 +10,7 @@ nonaltReblog.extensionId = null;
 nonaltReblog.preflight = false;
 nonaltReblog.postUrlPattern = /^(https:\/\/[^\/]+\/post\/(\d+))(?:\/.*)?$/;
 nonaltReblog.imageUrlChecks = {};
-nonaltReblog.postUrlToImageUrls = {};
+nonaltReblog.postUrlToImages = {};
 nonaltReblog.activeElement = null;
 
 import {
@@ -225,7 +225,7 @@ nonaltReblog.matchImages = async (postUrl, postImageUrls, images) => {
         throw new Error(`${matchResults.length} != ${postImageUrls.length}`);
     }
 
-    const matchedImageUrls = [];
+    const matchedImages = [];
     for (let i = 0; i < postImageUrls.length; ++i) {
         const matchResult = matchResults[i];
         if (typeof matchResult.index !== 'number') {
@@ -241,16 +241,16 @@ nonaltReblog.matchImages = async (postUrl, postImageUrls, images) => {
             throw new Error(`${matchResult.score}`);
         }
 
-        const targetImage = images[matchResult.index];
-        const targetUrl = targetImage.url;
+        const matchedImage = images[matchResult.index];
+        const matchedImageUrl = matchedImage.imageUrl;
         const matchScore = matchResult.score;
-        if (matchResult.score < 0.99) {
-            console.error(`${postUrl}: Does not match to any image. A candidate is ${targetUrl} (${matchScore}).`);
+        if (matchScore < 0.99) {
+            console.error(`${postUrl}: Does not match to any image. A candidate is ${matchedImageUrl} (${matchScore}).`);
             return null;
         }
-        matchedImageUrls.push(targetUrl);
+        matchedImages.push(matchedImage);
     }
-    return matchedImageUrls;
+    return matchedImages;
 }
 
 nonaltReblog.initiatePreflight = async () => {
@@ -328,8 +328,13 @@ nonaltReblog.initiatePreflight = async () => {
                 nonaltReblog.preflight = false;
                 return;
             }
-            if (typeof image.url !== 'string') {
-                console.assert(typeof image.url === 'string', typeof image.url);
+            if (typeof image.artistUrl !== 'string') {
+                console.assert(typeof image.artistUrl === 'string', typeof image.artistUrl);
+                nonaltReblog.preflight = false;
+                return;
+            }
+            if (typeof image.imageUrl !== 'string') {
+                console.assert(typeof image.imageUrl === 'string', typeof image.imageUrl);
                 nonaltReblog.preflight = false;
                 return;
             }
@@ -354,14 +359,17 @@ nonaltReblog.initiatePreflight = async () => {
             continue;
         }
 
-        const matchedImageUrls = await nonaltReblog.matchImages(postUrl, postImageUrls, images);
-        if (Array.isArray(matchedImageUrls) !== true) {
+        const matchedImages = await nonaltReblog.matchImages(postUrl, postImageUrls, images);
+        if (Array.isArray(matchedImages) !== true) {
             const nextElement = await nonaltReblog.moveToNextPost(element);
             element.remove();
             element = nextElement;
             element.focus();
             continue;
         }
+
+        const matchedImageUrls = matchedImages.map(x => x.imageUrl);
+
         if ([...new Set(matchedImageUrls)].length != postImageUrls.length) {
             console.error(`${postUrl}: Multiple post images match to the same target image.`);
             const nextElement = await nonaltReblog.moveToNextPost(element);
@@ -426,7 +434,7 @@ nonaltReblog.initiatePreflight = async () => {
             }
         }
         if (allDuplicated === true) {
-            console.info(`  ${postUrl}: Removed.`);
+            console.info(`  => ${postUrl}: Removed.`);
             const nextElement = await nonaltReblog.moveToNextPost(element);
             element.remove();
             element = nextElement;
@@ -435,7 +443,12 @@ nonaltReblog.initiatePreflight = async () => {
         }
         else {
             console.info(`${postUrl}: ${JSON.stringify(matchedImageUrls)}`);
-            nonaltReblog.postUrlToImageUrls[postUrl] = matchedImageUrls;
+            nonaltReblog.postUrlToImages[postUrl] = matchedImages.map(x => {
+                return {
+                    artistUrl: x.artistUrl,
+                    imageUrl: x.imageUrl
+                };
+            });
         }
 
         element = await nonaltReblog.moveToNextPost(element);
@@ -456,16 +469,17 @@ nonaltReblog.queueForReblogging = async event => {
         return;
     }
 
-    if (postUrl in nonaltReblog.postUrlToImageUrls === false) {
+    if (postUrl in nonaltReblog.postUrlToImages === false) {
         console.warn(`${postUrl}: Execute preflight first.`);
         return;
     }
-    const imageUrls = nonaltReblog.postUrlToImageUrls[postUrl];
-    if (imageUrls.length === 0) {
-        console.assert(imageUrls.length >= 1);
+    const images = nonaltReblog.postUrlToImages[postUrl];
+    if (images.length === 0) {
+        console.assert(images.length >= 1);
         return;
     }
 
+    const imageUrls = images.map(x => x.imageUrl);
     let allFound = true;
     for (const imageUrl of imageUrls) {
         const result = await nonaltReblog.sendMessageToExtension({
@@ -500,7 +514,7 @@ nonaltReblog.queueForReblogging = async event => {
         type: 'queueForReblogging',
         tabId: nonaltReblog.tabId,
         postUrl: postUrl,
-        imageUrls: imageUrls
+        images: images
     });
 }
 

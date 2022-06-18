@@ -89,6 +89,60 @@ async function expandPixivArtworks(tabId) {
     });
 }
 
+async function getPixivArtistUrl(tabId) {
+    const artistUrl = await executeScript({
+        target: {
+            tabId: tabId
+        },
+        func: () => {
+            function impl(element) {
+                checkElement: {
+                    if (typeof element.nodeName !== 'string') {
+                        break checkElement;
+                    }
+                    const name = element.nodeName.toUpperCase();
+                    if (name !== 'A') {
+                        break checkElement;
+                    }
+
+                    const innerText = element.innerText;
+                    if (innerText !== '作品一覧を見る') {
+                        break checkElement;
+                    }
+
+                    const href = element.href;
+                    const pattern = /^(https:\/\/www\.pixiv\.net\/users\/\d+)\/artworks$/;
+                    const match = pattern.exec(href);
+                    if (Array.isArray(match) !== true) {
+                        break checkElement;
+                    }
+                    if (/^https:\/\/www\.pixiv\.net\/users\/\d+$/.test(match[1]) !== true) {
+                        throw new Error(`${match[1]}: An unexpected artist URL.`);
+                    }
+
+                    return match[1];
+                }
+
+                const children = element.children;
+                if (typeof children !== 'object') {
+                    return null;
+                }
+                for (const child of children) {
+                    const result = impl(child);
+                    if (typeof result === 'string') {
+                        return result;
+                    }
+                }
+                return null;
+            }
+
+            return impl(document);
+        },
+        world: 'MAIN'
+    });
+    return artistUrl;
+}
+
 async function getPixivImagesImpl(tabId, sourceUrl, images) {
     const newTab = await createTab({
         openerTabId: tabId,
@@ -109,6 +163,13 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
         },
         world: 'MAIN'
     });
+
+    const artistUrl = await getPixivArtistUrl(newTab.id);
+    if (typeof artistUrl !== 'string') {
+        console.warn(`${sourceUrl}: Failed to get artist URL.`);
+        chrome.tabs.remove(newTab.id);
+        return;
+    }
 
     await expandPixivArtworks(newTab.id);
 
@@ -140,6 +201,7 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
     const imageUrlsUniqued = [...new Set(imageUrls)];
     const newImages = await fetchImages(imageUrlsUniqued, sourceUrl);
     for (const newImage of newImages) {
+        newImage.artistUrl = artistUrl;
         images.push(newImage);
     }
 
@@ -220,6 +282,15 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     });
     await sleep(5 * 1000);
 
+    const artistUrl = (() => {
+        const pattern = /^https:\/\/twitter\.com\/[0-9A-Z_a-z]+/;
+        const match = pattern.exec(sourceUrl);
+        if (Array.isArray(match) !== true) {
+            throw new Error(`${sourceUrl}: An invalid source URL.`);
+        }
+        return match[0];
+    })();
+
     const imageUrls = await executeScript({
         target: {
             tabId: newTab.id
@@ -250,6 +321,7 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     const originalImageUrlsUniqued = [...new Set(originalImageUrls)];
     const newImages = await fetchImages(originalImageUrlsUniqued, sourceUrl);
     for (const newImage of newImages) {
+        newImage.artistUrl = artistUrl;
         images.push(newImage);
     }
 
@@ -327,14 +399,14 @@ async function getImages(tabId, hrefs, innerText, sendResponse) {
     });
 }
 
-async function queueForReblogging(tabId, postUrl, imageUrls, sendResponse) {
+async function queueForReblogging(tabId, postUrl, images, sendResponse) {
     const items = await chrome.storage.local.get('reblogQueue');
     if ('reblogQueue' in items === false) {
         items['reblogQueue'] = [];
     }
     items['reblogQueue'].push({
         postUrl: postUrl,
-        imageUrls: imageUrls
+        images: images
     });
     await chrome.storage.local.set(items);
 
@@ -351,20 +423,40 @@ async function queueForReblogging(tabId, postUrl, imageUrls, sendResponse) {
     });
 }
 
-async function dequeueForReblogging(tabId) {
-    const userAgent = executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: () => navigator.userAgent,
-        world: 'MAIN'
-    });
-
-    const items = await chrome.storage.local.get('reblogQueue');
-    if ('reblogQueue' in items === false) {
-        return;
+async function createArtistTagger() {
+    const artistTagger = {};
+    {
+        const url = chrome.runtime.getURL('artists.json');
+        const response = await fetch(url);
+        if (response.ok !== true) {
+            throw new Error('Failed to read `artists.json`.')
+        }
+    
+        const artistsInfo = await response.json();
+        for (const info of artistsInfo) {
+            const artistNames = 'artistNames' in info ? info.artistNames : [];
+            const circleNames = 'circleNames' in info ? info.circleNames : [];
+            for (const url of info.urls) {
+                artistTagger[url] = {
+                    artistNames: artistNames,
+                    circleNames: circleNames
+                };
+            }
+        }
     }
-    const reblogQueue = items.reblogQueue;
+    return artistTagger;
+}
+
+async function dequeueForReblogging(tabId) {
+    const artistTagger = await createArtistTagger();
+
+    const reblogQueue = await (async () => {
+        const items = await chrome.storage.local.get('reblogQueue');
+        if ('reblogQueue' in items === false) {
+            return;
+        }
+        return items.reblogQueue;
+    })();
 
     while (reblogQueue.length > 0) {
         const postUrl = reblogQueue[0].postUrl;
@@ -380,7 +472,36 @@ async function dequeueForReblogging(tabId) {
             return;
         }
 
-        const imageUrls = reblogQueue[0].imageUrls;
+        const artistUrls = (() => {
+            const artistUrls = reblogQueue[0].images.map(x => x.artistUrl);
+            return [...new Set(artistUrls)];
+        })();
+        if (Array.isArray(artistUrls) === false) {
+            console.assert(Array.isArray(artistUrls), typeof artistUrls);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: artistUrls => { console.assert(Array.isArray(artistUrls), typeof artistUrls); },
+                args: [artistUrls]
+            });
+            return;
+        }
+        for (const artistUrl of artistUrls) {
+            if (typeof artistUrl !== 'string') {
+                console.assert(typeof artistUrl === 'string', typeof artistUrl);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: artistUrl => { console.assert(typeof artistUrl === 'string', typeof artistUrl); },
+                    args: [artistUrl]
+                });
+                return;
+            }
+        }
+
+        const imageUrls = reblogQueue[0].images.map(x => x.imageUrl);
         if (Array.isArray(imageUrls) === false) {
             console.assert(Array.isArray(imageUrls), typeof imageUrls);
             executeScript({
@@ -674,8 +795,7 @@ async function dequeueForReblogging(tabId) {
             const response = await fetch(myDomain, {
                 method: 'GET',
                 headers: {
-                    Accept: 'text/html',
-                    'User-Agent': userAgent
+                    Accept: 'text/html'
                 },
                 credentials: 'include'
             });
@@ -783,9 +903,10 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
             }
             const reblogQueue = items.reblogQueue;
 
+            const imageUrls = reblogQueue.map(x => x.images).flat().map(x => x.imageUrl);
             sendResponse({
                 errorMessage: null,
-                found: reblogQueue.map(x => x.imageUrls).flat().includes(key)
+                found: imageUrls.includes(key)
             });
         })();
 
@@ -878,22 +999,39 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
             return false;
         }
 
-        const imageUrls = message.imageUrls;
-        if (Array.isArray(imageUrls) === false) {
-            console.assert(Array.isArray(imageUrls), typeof imageUrls);
+        const images = message.images;
+        if (Array.isArray(images) !== true) {
+            console.assert(Array.isArray(images), typeof images);
             executeScript({
                 target: {
                     tabId: tabId
                 },
-                func: imageUrls => { console.assert(Array.isArray(imageUrls), typeof imageUrls); },
-                args: [imageUrls]
+                func: images => { console.assert(Array.isArray(images), typeof images); },
+                args: [images]
             });
             sendResponse({
-                errorMessage: `${typeof imageUrls}: An invalid type.`
+                errorMessage: `${typeof images}: An invalid type.`
             });
             return false;
         }
-        for (const imageUrl of imageUrls) {
+        for (const image of images) {
+            const artistUrl = image.artistUrl;
+            if (typeof artistUrl !== 'string') {
+                console.assert(typeof artistUrl === 'string', typeof artistUrl);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: artistUrl => { console.assert(typeof artistUrl === 'string', typeof artistUrl); },
+                    args: [artistUrl]
+                });
+                sendResponse({
+                    errorMessage: `${typeof artistUrl}: An invalid type.`
+                });
+                return false;
+            }
+
+            const imageUrl = image.imageUrl;
             if (typeof imageUrl !== 'string') {
                 console.assert(typeof imageUrl === 'string', typeof imageUrl);
                 executeScript({
@@ -910,7 +1048,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
             }
         }
 
-        queueForReblogging(tabId, postUrl, imageUrls, sendResponse);
+        queueForReblogging(tabId, postUrl, images, sendResponse);
         return true;
     }
 

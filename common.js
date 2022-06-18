@@ -100,7 +100,7 @@ export function fetchImages(imageUrls, referrer) {
         const images = [];
         for (let i = 0; i < imageUrls.length; ++i) {
             images.push({
-                url: imageUrls[i],
+                imageUrl: imageUrls[i],
                 mime: mimeList[i],
                 blob: base64StringList[i]
             });

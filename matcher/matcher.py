@@ -37,7 +37,10 @@ _REQUEST_IMAGE_BLOB_JSON_SCHEMA = {
         'blob'
     ],
     'properties': {
-        'url': {
+        'artistUrl': {
+            'type': 'string'
+        },
+        'imageUrl': {
             'type': 'string'
         },
         'mime': {
