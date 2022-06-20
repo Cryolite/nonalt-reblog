@@ -7,112 +7,18 @@ if ('nonaltReblog' in window === false) {
 }
 nonaltReblog.tabId = null;
 nonaltReblog.extensionId = null;
+
+nonaltReblog.activeElement = null;
 nonaltReblog.preflight = false;
-nonaltReblog.postUrlPattern = /^(https:\/\/[^\/]+\/post\/(\d+))(?:\/.*)?$/;
 nonaltReblog.imageUrlChecks = {};
 nonaltReblog.postUrlToImages = {};
-nonaltReblog.activeElement = null;
 
 import {
-    sleep, fetchImages
-} from "chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js";
+    sleep, getLeftMostPostUrlInInnerHtml, sendMessageToExtension
+} from 'chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js';
 
-nonaltReblog.sendMessageToExtension = message => {
-    const promise = new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(nonaltReblog.extensionId, message, result => {
-            if (result === undefined) {
-                const lastError = JSON.stringify(chrome.runtime.lastError);
-                console.error(lastError);
-                reject(new Error(lastError));
-                return;
-            }
-            resolve(result);
-            return;
-        });
-    });
-    return promise;
-}
-
-nonaltReblog.moveToNextPost = async postElement => {
-    const nextPostElement = postElement.nextElementSibling;
-    if (typeof nextPostElement === 'undefined') {
-        const errorMessage = '`postElement.nextElementSibling` is `undefined`.';
-        console.error(errorMessage);
-        throw new Error(errorMessage);
-    }
-
-    if (nextPostElement !== null) {
-        if (typeof nextPostElement !== 'object') {
-            console.assert(typeof nextPostElement === 'object', typeof nextPostElement);
-            throw new Error(`${typeof nextPostElement}: An invalid type.`)
-        }
-        nextPostElement.focus();
-        return nextPostElement;
-    }
-
-    {
-        const keyboardEvent = new KeyboardEvent('keydown', {
-            bubbles: true,
-            cancelable: true,
-            key: 'j',
-            code: 'KeyJ'
-        });
-        postElement.dispatchEvent(keyboardEvent);
-    }
-
-    while (true) {
-        const nextPostElement = postElement.nextElementSibling;
-        if (nextPostElement !== null) {
-            if (typeof nextPostElement !== 'object') {
-                console.assert(typeof nextPostElement === 'object', typeof nextPostElement);
-                throw new Error(`${typeof nextPostElement}: An invalid type.`)
-            }
-            nextPostElement.focus();
-            return nextPostElement;
-        }
-        await sleep(1000);
-    }
-}
-
-nonaltReblog.getLeftMostPostUrlInInnerHtml = element => {
-    matchHrefAgaintPostUrl: {
-        if (typeof element.nodeName !== 'string') {
-            break matchHrefAgaintPostUrl;
-        }
-        const name = element.nodeName.toUpperCase();
-        if (name !== 'A') {
-            break matchHrefAgaintPostUrl;
-        }
-
-        const href = element.href;
-        if (typeof href !== 'string') {
-            break matchHrefAgaintPostUrl;
-        }
-
-        const matches = nonaltReblog.postUrlPattern.exec(href);
-        if (!Array.isArray(matches)) {
-            break matchHrefAgaintPostUrl;
-        }
-
-        return matches[1];
-    }
-
-    const children = element.children;
-    if (typeof children !== 'object') {
-        return null;
-    }
-    for (const child of children) {
-        const result = nonaltReblog.getLeftMostPostUrlInInnerHtml(child);
-        if (typeof result === 'string') {
-            return result;
-        }
-    }
-
-    return null;
-}
-
-nonaltReblog.getHrefsInInnerHtml = element => {
-    function impl(element, hrefs) {
+function getHrefsInInnerHtml(element) {
+    const impl = (element, hrefs) => {
         matchHrefAgaintPostUrl: {
             if (typeof element.nodeName !== 'string') {
                 break matchHrefAgaintPostUrl;
@@ -145,7 +51,7 @@ nonaltReblog.getHrefsInInnerHtml = element => {
     return [...new Set(hrefs)];
 }
 
-nonaltReblog.getPostImageUrls = element => {
+function getPostImageUrls(element) {
     const srcPattern = /^(https:\/\/64\.media\.tumblr\.com\/[0-9a-z]+\/(?:[0-9a-z]+-[0-9a-z]+\/s\d+x\d+\/[0-9a-z]+|tumblr_[0-9A-Za-z]+_\d+)\.(?:jpg|pnj|gifv))\s+(\d+)w$/;
 
     const impl = (element, imageUrls) => {
@@ -198,250 +104,154 @@ nonaltReblog.getPostImageUrls = element => {
     return [...new Set(imageUrls)];
 }
 
-nonaltReblog.matchImages = async (postUrl, postImageUrls, images) => {
-    const postImages = await fetchImages(postImageUrls, postUrl);
-
-    const requestBody = {
-        sources: postImages,
-        targets: images
-    }
-    const response = await fetch('http://localhost:5000/', {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json, text/html',
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-    });
-    if (response.ok !== true) {
-        throw new Error(`Failed to connect \`matcher\` (${response.status}).\n${await response.text()}`);
-    }
-
-    const matchResults = JSON.parse(await response.text());
-    if (Array.isArray(matchResults) !== true) {
-        throw new Error(`${typeof matchResults}`);
-    }
-    if (matchResults.length !== postImageUrls.length) {
-        throw new Error(`${matchResults.length} != ${postImageUrls.length}`);
-    }
-
-    const matchedImages = [];
-    for (let i = 0; i < postImageUrls.length; ++i) {
-        const matchResult = matchResults[i];
-        if (typeof matchResult.index !== 'number') {
-            throw new Error(`${typeof matchResult.index}`);
-        }
-        if (matchResult.index < 0 || images.length <= matchResult.index) {
-            throw new Error(`${matchResult.index}`);
-        }
-        if (typeof matchResult.score !== 'number') {
-            throw new Error(`${typeof matchResult.score}`);
-        }
-        if (matchResult.score < 0.0 || 1.0 < matchResult.score) {
-            throw new Error(`${matchResult.score}`);
-        }
-
-        const matchedImage = images[matchResult.index];
-        const matchedImageUrl = matchedImage.imageUrl;
-        const matchScore = matchResult.score;
-        if (matchScore < 0.99) {
-            console.error(`${postUrl}: Does not match to any image. A candidate is ${matchedImageUrl} (${matchScore}).`);
-            return null;
-        }
-        matchedImages.push(matchedImage);
-    }
-    return matchedImages;
-}
-
-nonaltReblog.initiatePreflight = async () => {
+async function initiatePreflight() {
     if (nonaltReblog.activeElement === null) {
         console.error('Press the `J` key (and possibly the `K` key afterwards) to set the starting position of preflight.')
         return;
     }
-    let element = nonaltReblog.activeElement;
+    let postElement = nonaltReblog.activeElement;
 
     const deadline = Date.now() + 6 * 60 * 60 * 1000;
     while (nonaltReblog.preflight && Date.now() <= deadline) {
-        const postUrl = nonaltReblog.getLeftMostPostUrlInInnerHtml(element);
-        if (postUrl === null) {
-            console.info('Removed because any post URL could not be identified.');
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
+        const messages = [];
+        const postUrlToElement = {};
+        while (postElement.nextElementSibling !== null) {
+            const previousPostElement = postElement;
+            postElement = postElement.nextElementSibling;
+            if (typeof postElement !== 'object') {
+                console.assert(typeof postElement === 'object', typeof postElement);
+                throw new Error(`${typeof postElement}: An unexpected type.`);
+            }
+            postElement.focus();
+
+            const postUrl = getLeftMostPostUrlInInnerHtml(previousPostElement);
+            if (postUrl === null) {
+                console.info('Removed because any post URL could not be identified.');
+                previousPostElement.remove();
+                continue;
+            }
+
+            const hrefs = getHrefsInInnerHtml(previousPostElement);
+            const innerText = previousPostElement.innerText;
+
+            {
+                const myAccountPattern = /^https:\/\/cryolite\.tumblr\.com/;
+                let skip = false;
+                for (const href of hrefs) {
+                    if (myAccountPattern.test(href) === true) {
+                        skip = true;
+                        break;
+                    }
+                }
+                if (skip === true) {
+                    console.info(`${postUrl}: Removed because this is my post or reblogged by me.`);
+                    previousPostElement.remove();
+                    continue;
+                }
+            }
+
+            const postImageUrls = getPostImageUrls(previousPostElement);
+            if (postImageUrls.length === 0) {
+                console.warn(`${postUrl}: Removed because any post image URL could not be identified.`);
+                previousPostElement.remove();
+                continue;
+            }
+
+            messages.push({
+                type: 'preflightOnPost',
+                tabId: nonaltReblog.tabId,
+                postUrl: postUrl,
+                postImageUrls: postImageUrls,
+                hrefs: hrefs,
+                innerText: innerText
+            });
+            postUrlToElement[postUrl] = previousPostElement;
+        }
+
+        if (messages.length === 0) {
+            await sleep(1000);
             continue;
         }
 
-        const hrefs = nonaltReblog.getHrefsInInnerHtml(element);
-        const innerText = element.innerText;
+        for (const message of messages) {
+            const result = await sendMessageToExtension(message);
+            if (result.errorMessage !== null) {
+                throw new Error(result.errorMessage);
+            }
 
-        {
-            const myAccountPattern = /^https:\/\/cryolite\.tumblr\.com/;
-            let skip = false;
-            for (const href of hrefs) {
-                if (href.search(myAccountPattern) !== -1) {
-                    console.info(`${postUrl}: Removed because this is my post or reblogged by me.`);
-                    const nextElement = await nonaltReblog.moveToNextPost(element);
-                    element.remove();
-                    element = nextElement;
-                    element.focus();
-                    skip = true;
+            const postUrl = result.postUrl;
+            if (typeof postUrl !== 'string') {
+                throw new Error(`${typeof postUrl}: An invalid type.`);
+            }
+
+            const matchedImages = result.matchedImages;
+            if (Array.isArray(matchedImages) !== true) {
+                const elementToRemove = postUrlToElement[postUrl];
+                elementToRemove.remove();
+                continue;
+            }
+
+            const matchedImageUrls = matchedImages.map(x => x.imageUrl);
+
+            let allDuplicated = true;
+            for (const imageUrl of matchedImageUrls) {
+                checkForDuplication: {
+                    if (imageUrl in nonaltReblog.imageUrlChecks) {
+                        if (nonaltReblog.imageUrlChecks[imageUrl] === postUrl) {
+                            nonaltReblog.preflight = false;
+                            console.assert(nonaltReblog.imageUrlChecks[imageUrl] !== postUrl, postUrl, imageUrl);
+                            return;
+                        }
+                        console.info(`${imageUrl}: Already detected in the dashboard.`);
+                        break checkForDuplication;
+                    }
+
+                    nonaltReblog.imageUrlChecks[imageUrl] = postUrl;
+
+                    {
+                        const result = await sendMessageToExtension({
+                            type: 'findInReblogQueue',
+                            key: imageUrl
+                        });
+                        if (result.errorMessage !== null) {
+                            nonaltReblog.preflight = false;
+                            throw new Error(result.errorMessage);
+                        }
+                        if (result.found === true) {
+                            console.info(`${imageUrl}: Already queued to be reblogged.`);
+                            break checkForDuplication;
+                        }
+                    }
+
+                    {
+                        const result = await sendMessageToExtension({
+                            type: 'findInLocalStorage',
+                            key: imageUrl
+                        });
+                        if (result.errorMessage !== null) {
+                            nonaltReblog.preflight = false;
+                            throw new Error(result.errorMessage);
+                        }
+                        if (result.found === true) {
+                            console.info(`${imageUrl}: Already reblogged.`);
+                            break checkForDuplication;
+                        }
+                    }
+
+                    allDuplicated = false;
+                    break checkForDuplication;
+                }
+                if (allDuplicated === false) {
                     break;
                 }
             }
-            if (skip === true) {
+            if (allDuplicated === true) {
+                console.info(`  => ${postUrl}: Removed.`);
+                const elementToRemove = postUrlToElement[postUrl];
+                elementToRemove.remove();
                 continue;
             }
-        }
 
-        const postImageUrls = nonaltReblog.getPostImageUrls(element);
-
-        if (postImageUrls.length === 0) {
-            console.warn(`${postUrl}: Removed because any post image URL could not be identified.`);
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
-            continue;
-        }
-
-        const result = await nonaltReblog.sendMessageToExtension({
-            type: 'getImages',
-            tabId: nonaltReblog.tabId,
-            hrefs: hrefs,
-            innerText: innerText
-        });
-        if (result.errorMessage !== null) {
-            console.error(result.errorMessage);
-            nonaltReblog.preflight = false;
-            return;
-        }
-        const images = result.images;
-        if (!Array.isArray(images)) {
-            console.assert(Array.isArray(images), typeof images);
-            nonaltReblog.preflight = false;
-            return;
-        }
-        for (const image of images) {
-            if (typeof image !== 'object') {
-                console.assert(typeof image === 'object', typeof image);
-                nonaltReblog.preflight = false;
-                return;
-            }
-            if (typeof image.artistUrl !== 'string') {
-                console.assert(typeof image.artistUrl === 'string', typeof image.artistUrl);
-                nonaltReblog.preflight = false;
-                return;
-            }
-            if (typeof image.imageUrl !== 'string') {
-                console.assert(typeof image.imageUrl === 'string', typeof image.imageUrl);
-                nonaltReblog.preflight = false;
-                return;
-            }
-            if (typeof image.mime !== 'string') {
-                console.assert(typeof image.mime === 'string', typeof image.mime);
-                nonaltReblog.preflight = false;
-                return;
-            }
-            if (typeof image.blob !== 'string') {
-                console.assert(typeof image.blob === 'string', typeof image.blob);
-                nonaltReblog.preflight = false;
-                return;
-            }
-        }
-
-        if (images.length === 0) {
-            console.warn(`${postUrl}: Removed because any image URL could not be identified.`);
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
-            continue;
-        }
-
-        const matchedImages = await nonaltReblog.matchImages(postUrl, postImageUrls, images);
-        if (Array.isArray(matchedImages) !== true) {
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
-            continue;
-        }
-
-        const matchedImageUrls = matchedImages.map(x => x.imageUrl);
-
-        if ([...new Set(matchedImageUrls)].length != postImageUrls.length) {
-            console.error(`${postUrl}: Multiple post images match to the same target image.`);
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
-            continue;
-        }
-
-        let allDuplicated = true;
-        for (const imageUrl of matchedImageUrls) {
-            checkForDuplication: {
-                if (imageUrl in nonaltReblog.imageUrlChecks) {
-                    if (nonaltReblog.imageUrlChecks[imageUrl] === postUrl) {
-                        nonaltReblog.preflight = false;
-                        console.assert(nonaltReblog.imageUrlChecks[imageUrl] !== postUrl, postUrl, imageUrl);
-                        return;
-                    }
-                    console.info(`${imageUrl}: Already detected in the dashboard.`);
-                    break checkForDuplication;
-                }
-
-                nonaltReblog.imageUrlChecks[imageUrl] = postUrl;
-
-                {
-                    const result = await nonaltReblog.sendMessageToExtension({
-                        type: 'findInReblogQueue',
-                        key: imageUrl
-                    });
-                    if (result.errorMessage !== null) {
-                        nonaltReblog.preflight = false;
-                        console.error(result.errorMessage);
-                        throw new Error(result.errorMessage);
-                    }
-                    if (result.found === true) {
-                        console.info(`${imageUrl}: Already queued to be reblogged.`);
-                        break checkForDuplication;
-                    }
-                }
-
-                {
-                    const result = await nonaltReblog.sendMessageToExtension({
-                        type: 'findInLocalStorage',
-                        key: imageUrl
-                    });
-                    if (result.errorMessage !== null) {
-                        nonaltReblog.preflight = false;
-                        console.error(result.errorMessage);
-                        throw new Error(result.errorMessage);
-                    }
-                    if (result.found === true) {
-                        console.info(`${imageUrl}: Already reblogged.`);
-                        break checkForDuplication;
-                    }
-                }
-
-                allDuplicated = false;
-                break checkForDuplication;
-            }
-            if (allDuplicated === false) {
-                break;
-            }
-        }
-        if (allDuplicated === true) {
-            console.info(`  => ${postUrl}: Removed.`);
-            const nextElement = await nonaltReblog.moveToNextPost(element);
-            element.remove();
-            element = nextElement;
-            element.focus();
-            continue;
-        }
-        else {
             console.info(`${postUrl}: ${JSON.stringify(matchedImageUrls)}`);
             nonaltReblog.postUrlToImages[postUrl] = matchedImages.map(x => {
                 return {
@@ -450,20 +260,18 @@ nonaltReblog.initiatePreflight = async () => {
                 };
             });
         }
-
-        element = await nonaltReblog.moveToNextPost(element);
     }
 
     nonaltReblog.preflight = false;
 }
 
-nonaltReblog.queueForReblogging = async event => {
+async function queueForReblogging(event) {
     const target = event.target;
     if (target === null) {
         return;
     }
 
-    const postUrl = nonaltReblog.getLeftMostPostUrlInInnerHtml(target);
+    const postUrl = getLeftMostPostUrlInInnerHtml(target);
     if (typeof postUrl !== 'string') {
         console.warn(`Failed to get the post URL.`);
         return;
@@ -482,7 +290,7 @@ nonaltReblog.queueForReblogging = async event => {
     const imageUrls = images.map(x => x.imageUrl);
     let allFound = true;
     for (const imageUrl of imageUrls) {
-        const result = await nonaltReblog.sendMessageToExtension({
+        const result = await sendMessageToExtension({
             type: 'findInLocalStorage',
             key: imageUrl
         });
@@ -510,7 +318,7 @@ nonaltReblog.queueForReblogging = async event => {
         return;
     }
 
-    nonaltReblog.sendMessageToExtension({
+    sendMessageToExtension({
         type: 'queueForReblogging',
         tabId: nonaltReblog.tabId,
         postUrl: postUrl,
@@ -613,8 +421,14 @@ document.addEventListener('keydown', async event => {
     if (nonaltReblog.preflight === false) {
         nonaltReblog.preflight = true;
         const startTime = Math.floor(Date.now() / 1000);
-        nonaltReblog.initiatePreflight().finally(() => {
+        initiatePreflight().finally(() => {
             nonaltReblog.preflight = false;
+
+            sendMessageToExtension({
+                type: 'savePostUrlToImages',
+                postUrlToImages: nonaltReblog.postUrlToImages
+            });
+
             let elapsedSeconds = Math.floor(Date.now() / 1000) - startTime;
             const elapsedHours = Math.floor(elapsedSeconds / 3600);
             elapsedSeconds -= elapsedHours * 3600;
@@ -651,7 +465,7 @@ document.addEventListener('keydown', async event => {
         return;
     }
 
-    nonaltReblog.queueForReblogging(event);
+    queueForReblogging(event);
 });
 
 document.addEventListener('keydown', async event => {
@@ -677,7 +491,7 @@ document.addEventListener('keydown', async event => {
         return;
     }
 
-    nonaltReblog.sendMessageToExtension({
+    sendMessageToExtension({
         type: 'dequeueForReblogging',
         tabId: nonaltReblog.tabId
     });

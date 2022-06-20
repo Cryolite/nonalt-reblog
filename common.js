@@ -1,3 +1,74 @@
+export async function sleep(milliseconds) {
+    if (typeof milliseconds !== 'number') {
+        console.assert(typeof milliseconds === 'number', typeof milliseconds);
+        throw new Error(`${typeof milliseconds}: An invalid type.`);
+    }
+
+    const promise = new Promise((resolve, reject) => {
+        setTimeout(() => {
+            resolve();
+        }, milliseconds);
+    });
+    return promise;
+}
+
+const POST_URL_PATTERN = /^(https:\/\/[^\/]+\/post\/(\d+))(?:\/.*)?$/;
+
+export function getLeftMostPostUrlInInnerHtml(element) {
+    matchHrefAgaintPostUrl: {
+        if (typeof element.nodeName !== 'string') {
+            break matchHrefAgaintPostUrl;
+        }
+        const name = element.nodeName.toUpperCase();
+        if (name !== 'A') {
+            break matchHrefAgaintPostUrl;
+        }
+
+        const href = element.href;
+        if (typeof href !== 'string') {
+            break matchHrefAgaintPostUrl;
+        }
+
+        const matches = POST_URL_PATTERN.exec(href);
+        if (!Array.isArray(matches)) {
+            break matchHrefAgaintPostUrl;
+        }
+
+        return matches[1];
+    }
+
+    const children = element.children;
+    if (typeof children !== 'object') {
+        return null;
+    }
+    for (const child of children) {
+        const result = getLeftMostPostUrlInInnerHtml(child);
+        if (typeof result === 'string') {
+            return result;
+        }
+    }
+
+    return null;
+}
+
+const EXTENSION_ID = 'biiglkpcdjpendjobkhgoeflaejipmfg';
+
+export function sendMessageToExtension(message) {
+    const promise = new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(EXTENSION_ID, message, result => {
+            if (result === undefined) {
+                const lastError = JSON.stringify(chrome.runtime.lastError);
+                console.error(lastError);
+                reject(new Error(lastError));
+                return;
+            }
+            resolve(result);
+            return;
+        });
+    });
+    return promise;
+}
+
 const URL_PATTERN_TO_FETCH = [
     [/^https:\/\/64\.media\.tumblr\.com\//, (url, referrer) => fetch(url, {
         method: 'GET',
@@ -23,20 +94,6 @@ const URL_PATTERN_TO_FETCH = [
         }
     })]
 ];
-
-export async function sleep(milliseconds) {
-    if (typeof milliseconds !== 'number') {
-        console.assert(typeof milliseconds === 'number', typeof milliseconds);
-        throw new Error(`${typeof milliseconds}: An invalid type.`);
-    }
-
-    const promise = new Promise((resolve, reject) => {
-        setTimeout(() => {
-            resolve();
-        }, milliseconds);
-    });
-    return promise;
-}
 
 export function fetchImages(imageUrls, referrer) {
     const impl = async () => {

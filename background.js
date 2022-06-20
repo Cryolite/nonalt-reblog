@@ -1,402 +1,18 @@
-import { sleep, fetchImages } from "./common.js";
+import { sleep } from './common.js';
+import { executeScript, createTab } from './background/common.js';
+import { preflightOnPost } from './background/preflight.js';
 
 const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
 
-// Create a new tab and wait for the resource loading for the page on that tab
-// to complete.
-async function createTab(createProperties) {
-    if ('openerTabId' in createProperties && 'windowId' in createProperties === false) {
-        const openerTabId = createProperties.openerTabId;
-        const openerTab = await chrome.tabs.get(openerTabId);
-        const windowId = openerTab.windowId;
-        createProperties.windowId = windowId;
+async function savePostUrlToImages(postUrlToImages) {
+    const items = await chrome.storage.local.get('postUrlToImages');
+    if ('postUrlToImages' in items === false) {
+        items['postUrlToImages'] = {};
     }
-
-    const tab = await chrome.tabs.create(createProperties);
-
-    const promise = new Promise((resolve, reject) => {
-        chrome.webNavigation.onCompleted.addListener(details => {
-            if (details.tabId !== tab.id) {
-                return;
-            }
-            resolve(tab);
-        });
-    });
-
-    return promise;
-}
-
-async function executeScript(scriptInjection) {
-    const injectionResults = await chrome.scripting.executeScript(scriptInjection);
-    if (injectionResults.length === 0) {
-        console.assert(injectionResults.length === 1, injectionResults.length);
-        const error = new Error('Script injection failed.');
-        throw error;
-    }
-    if (injectionResults.length >= 2) {
-        console.assert(injectionResults.length === 1, injectionResults.length);
-        const error = new Error(`Unintended script injection into ${injectionResults.length} frames.`);
-        throw error;
-    }
-    const injectionResult = injectionResults[0];
-    return injectionResult.result;
-}
-
-async function expandPixivArtworks(tabId) {
-    await executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: () => {
-            function expandImpl(element) {
-                checkAndClick: {
-                    if (typeof element.nodeName !== 'string') {
-                        break checkAndClick;
-                    }
-                    const name = element.nodeName.toUpperCase();
-                    if (name !== 'DIV') {
-                        break checkAndClick;
-                    }
-
-                    const innerText = element.innerText;
-                    if (innerText.search(/^\d+\/\d+$/) === -1) {
-                        break checkAndClick;
-                    }
-
-                    const onclick = element.onclick;
-                    if (onclick === null) {
-                        break checkAndClick;
-                    }
-
-                    element.click();
-                    return;
-                }
-
-                const children = element.children;
-                if (typeof children !== 'object') {
-                    return;
-                }
-                for (const child of children) {
-                    expandImpl(child);
-                }
-            }
-
-            expandImpl(document);
-        },
-        world: 'MAIN'
-    });
-}
-
-async function getPixivArtistUrl(tabId) {
-    const artistUrl = await executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: () => {
-            function impl(element) {
-                checkElement: {
-                    if (typeof element.nodeName !== 'string') {
-                        break checkElement;
-                    }
-                    const name = element.nodeName.toUpperCase();
-                    if (name !== 'A') {
-                        break checkElement;
-                    }
-
-                    const innerText = element.innerText;
-                    if (innerText !== '作品一覧を見る') {
-                        break checkElement;
-                    }
-
-                    const href = element.href;
-                    const pattern = /^(https:\/\/www\.pixiv\.net\/users\/\d+)\/artworks$/;
-                    const match = pattern.exec(href);
-                    if (Array.isArray(match) !== true) {
-                        break checkElement;
-                    }
-                    if (/^https:\/\/www\.pixiv\.net\/users\/\d+$/.test(match[1]) !== true) {
-                        throw new Error(`${match[1]}: An unexpected artist URL.`);
-                    }
-
-                    return match[1];
-                }
-
-                const children = element.children;
-                if (typeof children !== 'object') {
-                    return null;
-                }
-                for (const child of children) {
-                    const result = impl(child);
-                    if (typeof result === 'string') {
-                        return result;
-                    }
-                }
-                return null;
-            }
-
-            return impl(document);
-        },
-        world: 'MAIN'
-    });
-    return artistUrl;
-}
-
-async function getPixivImagesImpl(tabId, sourceUrl, images) {
-    const newTab = await createTab({
-        openerTabId: tabId,
-        url: sourceUrl,
-        active: false
-    });
-    // Resource loading for the page sometimes takes a long time. In such cases,
-    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
-    // injection sets a time limit on resource loading for the page.
-    await executeScript({
-        target: {
-            tabId: newTab.id
-        },
-        func: () => {
-            setTimeout(() => {
-                window.stop();
-            }, 60 * 1000);
-        },
-        world: 'MAIN'
-    });
-
-    const artistUrl = await getPixivArtistUrl(newTab.id);
-    if (typeof artistUrl !== 'string') {
-        console.warn(`${sourceUrl}: Failed to get artist URL.`);
-        chrome.tabs.remove(newTab.id);
-        return;
-    }
-
-    await expandPixivArtworks(newTab.id);
-
-    const linkUrls = await executeScript({
-        target: {
-            tabId: newTab.id
-        },
-        func: () => {
-            const links = [];
-            for (let i = 0; i < document.links.length; ++i) {
-                const link = document.links[i];
-                const href = link.href;
-                links.push(href);
-            }
-            return links;
-        },
-        world: 'MAIN'
-    });
-
-    const imageUrlPattern = /^https:\/\/i\.pximg\.net\/img-original\/img\/\d{4}(?:\/\d{2}){5}\/\d+_p0\.\w+/;
-    const imageUrls = [];
-    for (const imageUrl of linkUrls) {
-        if (imageUrl.search(imageUrlPattern) === -1) {
-            continue;
-        }
-        imageUrls.push(imageUrl);
-    }
-
-    const imageUrlsUniqued = [...new Set(imageUrls)];
-    const newImages = await fetchImages(imageUrlsUniqued, sourceUrl);
-    for (const newImage of newImages) {
-        newImage.artistUrl = artistUrl;
-        images.push(newImage);
-    }
-
-    chrome.tabs.remove(newTab.id);
-}
-
-async function getPixivImages(tabId, hrefs, innerText) {
-    const sourceUrls = [];
-    {
-        const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/www\.pixiv\.net)(?:\/en)?(\/artworks\/\d+)/;
-        for (const href of hrefs) {
-            const matches = sourceUrlPattern.exec(href);
-            if (!Array.isArray(matches)) {
-                continue;
-            }
-            sourceUrls.push(matches[1] + matches[2]);
-        }
-    }
-    {
-        const sourceUrlPattern = /^https:\/\/href\.li\/\?http:\/\/www\.pixiv\.net\/member_illust\.php\?mode=[^&]+&illust_id=(\d+)/;
-        for (const href of hrefs) {
-            const matches = sourceUrlPattern.exec(href);
-            if (!Array.isArray(matches)) {
-                continue;
-            }
-            sourceUrls.push('https://www.pixiv.net/artworks/' + matches[1]);
-        }
-    }
-
-    const images = [];
-    for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getPixivImagesImpl(tabId, sourceUrl, images);
-    }
-    return images;
-}
-
-async function followTwitterShortUrl(url) {
-    if (/^https:\/\/t\.co\/[0-9A-Za-z]+$/.test(url) !== true) {
-        throw new Error(`${url}: An invalid URL.`);
-    }
-
-    const response = await fetch(url);
-    if (response.ok !== true) {
-        throw new Error(`${url}: Failed to fetch (${url.status}).`);
-    }
-
-    const responseBody = await response.text();
-    const sourceUrlPattern = /(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
-    const match = sourceUrlPattern.exec(responseBody);
-    if (Array.isArray(match) !== true) {
-        return null;
-    }
-    return match[1];
-}
-
-async function getTwitterImagesImpl(tabId, sourceUrl, images) {
-    // To retrieve the URL of the original images from a Twitter tweet URL, open
-    // the tweet page in the foreground, wait a few seconds, and extract the
-    // URLs from the `images`.
-    const newTab = await createTab({
-        openerTabId: tabId,
-        url: sourceUrl,
-        active: true
-    });
-    // Resource loading for the page sometimes takes a long time. In such cases,
-    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
-    // injection sets a time limit on resource loading for the page.
-    await executeScript({
-        target: {
-            tabId: newTab.id
-        },
-        func: () => {
-            setTimeout(() => {
-                window.stop();
-            }, 60 * 1000);
-        },
-        world: 'MAIN'
-    });
-    await sleep(5 * 1000);
-
-    const artistUrl = (() => {
-        const pattern = /^https:\/\/twitter\.com\/[0-9A-Z_a-z]+/;
-        const match = pattern.exec(sourceUrl);
-        if (Array.isArray(match) !== true) {
-            throw new Error(`${sourceUrl}: An invalid source URL.`);
-        }
-        return match[0];
-    })();
-
-    const imageUrls = await executeScript({
-        target: {
-            tabId: newTab.id
-        },
-        func: () => {
-            const images = [];
-            for (let i = 0; i < document.images.length; ++i) {
-                const image = document.images[i];
-                const currentSrc = image.currentSrc;
-                images.push(currentSrc);
-            }
-            return images;
-        },
-        world: 'MAIN'
-    });
-
-    const imageUrlPattern = /^(https:\/\/pbs\.twimg\.com\/media\/[^\?]+\?format=[^&]+)&name=.+/;
-    const imageUrlReplacement = '$1&name=orig';
-    const originalImageUrls = [];
-    for (const imageUrl of imageUrls) {
-        if (imageUrl.search(imageUrlPattern) === -1) {
-            continue;
-        }
-        const originalImageUrl = imageUrl.replace(imageUrlPattern, imageUrlReplacement);
-        originalImageUrls.push(originalImageUrl);
-    }
-
-    const originalImageUrlsUniqued = [...new Set(originalImageUrls)];
-    const newImages = await fetchImages(originalImageUrlsUniqued, sourceUrl);
-    for (const newImage of newImages) {
-        newImage.artistUrl = artistUrl;
-        images.push(newImage);
-    }
-
-    chrome.tabs.remove(newTab.id);
-}
-
-async function getTwitterImages(tabId, hrefs, innerText) {
-    const sourceUrls = [];
-    {
-        const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
-        for (const href of hrefs) {
-            const matches = sourceUrlPattern.exec(href);
-            if (Array.isArray(matches) !== true) {
-                continue;
-            }
-            sourceUrls.push(matches[1]);
-        }
-    }
-    {
-        const shortUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/t\.co\/[0-9A-Za-z]+)/;
-        for (const href of hrefs) {
-            const shortMatches = shortUrlPattern.exec(href);
-            if (Array.isArray(shortMatches) === true) {
-                const sourceUrl = await followTwitterShortUrl(shortMatches[1]);
-                if (typeof sourceUrl === 'string') {
-                    sourceUrls.push(sourceUrl);
-                }
-            }
-        }
-    }
-    {
-        const sourceUrlPattern = /https:\/\/twitter\.com\/[^\/]+\/status\/\d+/g;
-        const matches = innerText.matchAll(sourceUrlPattern);
-        for (const match of matches) {
-            sourceUrls.push(match[0]);
-        }
-    }
-    {
-        const shortUrlPattern = /https:\/\/t\.co\/[0-9A-Za-z]+/g;
-        const shortMatches = innerText.matchAll(shortUrlPattern);
-        for (const shortMatch of shortMatches) {
-            const sourceUrl = await followTwitterShortUrl(shortMatch[0]);
-            if (typeof sourceUrl === 'string') {
-                sourceUrls.push(sourceUrl);
-            }
-        }
-    }
-
-    const images = [];
-    for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getTwitterImagesImpl(tabId, sourceUrl, images);
-    }
-    return images;
-}
-
-const imagesGetters = [
-    getPixivImages,
-    getTwitterImages
-];
-
-async function getImages(tabId, hrefs, innerText, sendResponse) {
-    for (const imagesGetter of imagesGetters) {
-        const images = await imagesGetter(tabId, hrefs, innerText);
-        if (images.length >= 1) {
-            sendResponse({
-                errorMessage: null,
-                images: images
-            });
-            return;
-        }
-    }
-    sendResponse({
-        errorMessage: null,
-        images: []
-    });
+    Object.assign(items['postUrlToImages'], postUrlToImages);
+    await chrome.storage.local.set(items);
 }
 
 async function queueForReblogging(tabId, postUrl, images, sendResponse) {
@@ -872,6 +488,41 @@ async function dequeueForReblogging(tabId) {
     }
 }
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const type = message.type;
+    if (typeof type !== 'string') {
+        console.assert(typeof type === 'string', typeof type);
+        sendResponse({
+            errorMessage: `${typeof type}: An invalid type.`
+        });
+        return false;
+    }
+
+    if (type === 'loadPostUrlToImages') {
+        (async () => {
+            const items = await chrome.storage.local.get('postUrlToImages');
+            if ('postUrlToImages' in items !== true) {
+                sendResponse({
+                    errorMessage: null,
+                    postUrlToImages: {}
+                });
+                return;
+            }
+            sendResponse({
+                errorMessage: null,
+                postUrlToImages: items.postUrlToImages
+            });
+        })();
+        return true;
+    }
+
+    console.error(`${message.type}: An invalid message type.`);
+    sendResponse({
+        errorMessage: `${message.type}: An invalid message type.`
+    });
+    return false;
+});
+
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     const type = message.type;
     if (typeof type !== 'string') {
@@ -932,27 +583,89 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
 
-    if (type === 'getImages') {
+    if (type === 'preflightOnPost') {
         const tabId = message.tabId;
         if (typeof tabId !== 'number') {
-            console.assert(typeof tabId === 'number', typeof tabId);
+            console.assert(typeof tabId !== 'number', typeof tabId);
             sendResponse({
-                errorMessage: `${typeof tabId}: An invalid type.`
+                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`
             });
             return false;
         }
 
+        const postUrl = message.postUrl;
+        if (typeof postUrl !== 'string') {
+            console.assert(typeof postUrl === 'string', typeof postUrl);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: postUrl => { console.assert(typeof postUrl === 'string', typeof postUrl); },
+                args: [postUrl]
+            });
+            sendResponse({
+                errorMessage: `${typeof postUrl}: An invalid type.`
+            });
+            return false;
+        }
+
+        const postImageUrls = message.postImageUrls;
+        if (Array.isArray(postImageUrls) !== true) {
+            console.assert(Array.isArray(postImageUrls), typeof postImageUrls);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: postImageUrls => console.assert(Array.isArray(postImageUrls), typeof postImageUrls),
+                args: [postImageUrls]
+            });
+            sendResponse({
+                errorMessage: `${typeof postImageUrls}: An invalid type.`
+            });
+            return false;
+        }
+        for (const postImageUrl of postImageUrls) {
+            if (typeof postImageUrl !== 'string') {
+                console.assert(typeof postImageUrl === 'string', typeof postImageUrl);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: postImageUrl => console.assert(typeof postImageUrl === 'string', typeof postImageUrl),
+                    args: [postImageUrl]
+                });
+                sendResponse({
+                    errorMessage: `${typeof postImageUrl}: An invalid type.`
+                });
+                return false;
+            }
+        }
+
         const hrefs = message.hrefs;
-        if (!Array.isArray(hrefs)) {
+        if (Array.isArray(hrefs) !== true) {
             console.assert(Array.isArray(hrefs), typeof hrefs);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: hrefs => console.assert(Array.isArray(hrefs), typeof hrefs),
+                args: [hrefs]
+            });
             sendResponse({
                 errorMessage: `${typeof hrefs}: An invalid type.`
             });
             return false;
         }
-        for (const href of hrefs) {
+        for (const href in hrefs) {
             if (typeof href !== 'string') {
                 console.assert(typeof href === 'string', typeof href);
+                executeScript({
+                    target: {
+                        tabId: tabId
+                    },
+                    func: href => { console.assert(typeof href === 'string', typeof href); },
+                    args: [href]
+                });
                 sendResponse({
                     errorMessage: `${typeof href}: An invalid type.`
                 });
@@ -963,13 +676,70 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         const innerText = message.innerText;
         if (typeof innerText !== 'string') {
             console.assert(typeof innerText === 'string', typeof innerText);
+            executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: innerText => console.assert(typeof innerText === 'string', typeof innerText),
+                args: [innerText]
+            });
             sendResponse({
                 errorMessage: `${typeof innerText}: An invalid type.`
-            })
+            });
             return false;
         }
 
-        getImages(tabId, hrefs, innerText, sendResponse);
+        preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, sendResponse);
+        return true;
+    }
+
+    if (type === 'savePostUrlToImages') {
+        const postUrlToImages = message.postUrlToImages;
+        if (typeof postUrlToImages !== 'object') {
+            console.assert(typeof postUrlToImages === 'object', typeof postUrlToImages);
+            sendResponse({
+                errorMessage: `${typeof postUrlToImages}: An invalid type for \`postUrlToImages\`.`
+            });
+            return false;
+        }
+        for (const [postUrl, images] of Object.entries(postUrlToImages)) {
+            if (typeof postUrl !== 'string') {
+                console.assert(typeof postUrl === 'string', typeof postUrl);
+                sendResponse({
+                    errorMessage: `${typeof postUrl}: An invalid type for \`postUrl\`.`
+                });
+                return false;
+            }
+
+            if (Array.isArray(images) !== true) {
+                console.assert(Array.isArray(images) === true, typeof images);
+                sendResponse({
+                    errorMessage: `${typeof images}: An invalid type for \`images\`.`
+                });
+                return false;
+            }
+            for (const image of images) {
+                const artistUrl = image.artistUrl;
+                if (typeof artistUrl !== 'string') {
+                    console.assert(typeof artistUrl === 'string', typeof artistUrl);
+                    sendResponse({
+                        errorMessage: `${typeof artistUrl}: An invalid type for \`artistUrl\`.`
+                    });
+                    return false;
+                }
+
+                const imageUrl = image.imageUrl;
+                if (typeof imageUrl !== 'string') {
+                    console.assert(typeof imageUrl === 'string', typeof imageUrl);
+                    sendResponse({
+                        errorMessage: `${typeof imageUrl}: An invalid type for \`imageUrl\`.`
+                    });
+                    return false;
+                }
+            }
+        }
+
+        savePostUrlToImages(postUrlToImages);
         return true;
     }
 

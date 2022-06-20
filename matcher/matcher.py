@@ -18,7 +18,7 @@ _EXTENSION_ID = 'biiglkpcdjpendjobkhgoeflaejipmfg'
 app = flask.Flask(__name__)
 cors = flask_cors.CORS(app, resources={
     r'/': {
-        'origins': ['https://www.tumblr.com'],
+        'origins': [f'chrome-extension://{_EXTENSION_ID}'],
         'methods': ['POST'],
         'allow_headers': ['Content-Type']
     },
