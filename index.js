@@ -5,12 +5,23 @@ import { createTab, executeScript } from "./background/common.js";
     const postUrls = await (async () => {
         const result = await sendMessageToExtension({
             type: 'loadPostUrlToImages'
-        })
+        });
         if (result.errorMessage !== null) {
             throw new Error(result.errorMessage);
         }
         const postUrlToImages = result.postUrlToImages;
-        return Object.keys(postUrlToImages);
+        const postUrls = Object.keys(postUrlToImages);
+
+        const pattern = /\d+$/;
+        const compareFunction = (lhs, rhs) => {
+            lhs = pattern.exec(lhs);
+            lhs = parseInt(lhs, 10);
+            rhs = pattern.exec(rhs);
+            rhs = parseInt(rhs, 10);
+            return lhs - rhs;
+        };
+        postUrls.sort(compareFunction);
+        return postUrls;
     })();
 
     for (const [index, postUrl] of postUrls.entries()) {
