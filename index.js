@@ -179,25 +179,20 @@ document.addEventListener('keydown', event => {
     if (event.code !== 'KeyJ') {
         return;
     }
-    if (event.sourceCapabilities === null) {
-        return;
-    }
 
-    if (document.activeElement === null) {
+    if (document.activeElement === null || document.activeElement.parentElement.id !== 'main') {
         if (document.body.children.length === 0) {
             return;
         }
-        const element = document.body.children[0];
-        element.scrollIntoView();
-        element.focus();
-        return;
-    }
 
-    if (document.activeElement.parentElement.id !== "main") {
-        if (document.body.children.length === 0) {
-            return;
+        const scrollY = window.scrollY;
+        let element = document.body.children[0];
+        while (element.getBoundingClientRect().top < scrollY) {
+            if (element.nextElementSibling === null) {
+                break;
+            }
+            element = element.nextElementSibling;
         }
-        const element = document.body.children[0];
         element.scrollIntoView();
         element.focus();
         return;
@@ -228,15 +223,22 @@ document.addEventListener('keydown', event => {
     if (event.code !== 'KeyK') {
         return;
     }
-    if (event.sourceCapabilities === null) {
-        return;
-    }
 
-    if (document.activeElement === null) {
-        return;
-    }
+    if (document.activeElement === null || document.activeElement.parentElement.id !== 'main') {
+        if (document.body.children.length === 0) {
+            return;
+        }
 
-    if (document.activeElement.parentElement !== document.body) {
+        const scrollY = window.scrollY;
+        let element = document.body.children[0];
+        while (element.getBoundingClientRect().top >= scrollY) {
+            if (element.previousElementSibling === null) {
+                break;
+            }
+            element = element.previousElementSibling;
+        }
+        element.scrollIntoView();
+        element.focus();
         return;
     }
 
@@ -263,9 +265,6 @@ document.addEventListener('keydown', async event => {
         return;
     }
     if (event.code !== 'KeyR') {
-        return;
-    }
-    if (event.sourceCapabilities === null) {
         return;
     }
 
