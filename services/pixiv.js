@@ -168,13 +168,13 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
 export async function getImages(tabId, hrefs, innerText) {
     const sourceUrls = [];
     {
-        const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/www\.pixiv\.net)(?:\/en)?(\/artworks\/\d+)/;
+        const sourceUrlPattern = /^https:\/\/href\.li\/\?https:\/\/(?:www\.)?pixiv\.net(?:\/en)?(\/artworks\/\d+)/;
         for (const href of hrefs) {
             const matches = sourceUrlPattern.exec(href);
             if (!Array.isArray(matches)) {
                 continue;
             }
-            sourceUrls.push(matches[1] + matches[2]);
+            sourceUrls.push('https://www.pixiv.net' + matches[1]);
         }
     }
     {
