@@ -42,7 +42,7 @@ async function queueForReblogging(tabId, postUrl, images, sendResponse) {
 async function createArtistTagger() {
     const artistTagger = {};
     {
-        const url = chrome.runtime.getURL('artists.json');
+        const url = chrome.runtime.getURL('data/artists.json');
         const response = await fetch(url);
         if (response.ok !== true) {
             throw new Error('Failed to read `artists.json`.')
@@ -170,6 +170,37 @@ async function dequeueForReblogging(tabId) {
                 });
 
                 continue;
+            }
+        }
+
+        // Construct tags if any.
+        const tags = [];
+
+        // Push artist names if any.
+        for (const artistUrl of artistUrls) {
+            if (artistUrl in artistTagger !== true) {
+                continue;
+            }
+            const artistInfo = artistTagger[artistUrl];
+            if ('artistNames' in artistInfo !== true) {
+                continue;
+            }
+            for (const artistName of artistInfo.artistNames) {
+                tags.push(`${artistName} (イラストレータ)`);
+            }
+        }
+
+        // Push circle names if any.
+        for (const artistUrl of artistUrls) {
+            if (artistUrl in artistTagger !== true) {
+                continue;
+            }
+            const artistInfo = artistTagger[artistUrl];
+            if ('circleNames' in artistInfo !== true) {
+                continue;
+            }
+            for (const circleName of artistInfo.circleNames) {
+                tags.push(`${circleName} (サークル)`);
             }
         }
 
@@ -358,7 +389,65 @@ async function dequeueForReblogging(tabId) {
                 tabId: newTab.id,
                 allFrames: true
             },
-            func: (postId, reblogKey) => {
+            func: (postId, tags, reblogKey) => {
+                function annotateTags(element) {
+                    findAndInputTagEditor: {
+                        if (typeof element.nodeName !== 'string') {
+                            break findAndInputTagEditor;
+                        }
+                        const nodeName = element.nodeName.toUpperCase();
+                        if (nodeName !== 'DIV') {
+                            break findAndInputTagEditor;
+                        }
+                        const className = element.className;
+                        if (className !== 'post-form--tag-editor') {
+                            break findAndInputTagEditor;
+                        }
+                        const textContent = element.textContent;
+                        // `textContent` has a zero-width space at its
+                        // beginning, so simple equality check fails.
+                        if (textContent.indexOf('#tags') === -1) {
+                            break findAndInputTagEditor;
+                        }
+                        const dataset = element.dataset;
+                        if ('subview' in dataset !== true) {
+                            break findAndInputTagEditor;
+                        }
+                        if (dataset.subview !== 'tagEditor') {
+                            break findAndInputTagEditor;
+                        }
+
+                        element.click();
+                        element = document.activeElement;
+                        for (const tag of tags) {
+                            element.insertAdjacentText('afterbegin', tag);
+
+                            const keyboardEvent = new KeyboardEvent('keydown', {
+                                bubbles: true,
+                                cancelable: true,
+                                code: 'Enter',
+                                keyCode: 13
+                            });
+                            element.dispatchEvent(keyboardEvent);
+                        }
+
+                        return true;
+                    }
+
+                    if (typeof element.children !== 'object') {
+                        return false;
+                    }
+                    for (const child of element.children) {
+                        const result = annotateTags(child);
+                        if (result === true) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                annotateTags(document);
+
                 function impl(element) {
                     checkAndClick: {
                         if (typeof element.nodeName !== 'string') {
@@ -397,7 +486,7 @@ async function dequeueForReblogging(tabId) {
 
                 impl(document);
             },
-            args: [postId, reblogKey],
+            args: [postId, tags, reblogKey],
             world: 'MAIN'
         });
 
