@@ -5,7 +5,8 @@
     "homepage_url": "https://github.com/Cryolite/nonalt-reblog",
     "version": "0.0.1",
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
     "host_permissions": [
         "https://*/*"
@@ -15,6 +16,12 @@
         "webNavigation",
         "scripting",
         "storage"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["common.js", "injection.js"],
+            "matches": ["https://www.tumblr.com/*"]
+        }
     ],
     "externally_connectable": {
         "matches": [
