@@ -24,7 +24,7 @@ import { createTab, executeScript } from "./background/common.js";
         return postUrls;
     })();
 
-    for (const [index, postUrl] of postUrls.entries()) {
+    for (const postUrl of postUrls) {
         const embedUrl = `${postUrl}/embed`;
 
         const newTab = await createTab({
@@ -56,7 +56,7 @@ import { createTab, executeScript } from "./background/common.js";
             continue;
         }
 
-        document.body.insertAdjacentHTML('beforeend', `<div tabindex="${index}"><a href="${postUrl}" style="display: none;"></a></div>`);
+        document.body.insertAdjacentHTML('beforeend', `<div tabindex="0"><a href="${postUrl}" style="display: none;"></a></div>`);
         const postContainerElement = document.body.children[document.body.children.length - 1];
 
         const newEmbedCode = embedCode.replace(/\\x3Cscript\s.+?<\/script>/, '')
@@ -64,7 +64,6 @@ import { createTab, executeScript } from "./background/common.js";
     }
 
     const scriptElement = document.createElement('script');
-    scriptElement.async = true;
     scriptElement.src = './external/assets.tumblr.com/post.js';
     const scriptLoadPromise = new Promise((resolve, reject) => {
         scriptElement.addEventListener('load', event => {
