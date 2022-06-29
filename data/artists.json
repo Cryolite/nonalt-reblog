@@ -1,6 +1,15 @@
 [
   {
     "urls": [
+      "https://www.pixiv.net/users/110539",
+      "https://twitter.com/1041abcd1"
+    ],
+    "artistNames": [
+      "1041"
+    ]
+  },
+  {
+    "urls": [
       "https://twitter.com/suyaya_oyasumi"
     ],
     "artistNames": [
@@ -198,6 +207,15 @@
   },
   {
     "urls": [
+      "https://www.pixiv.net/users/4701345",
+      "https://twitter.com/hsinhsincookie"
+    ],
+    "artistNames": [
+      "HSIN"
+    ]
+  },
+  {
+    "urls": [
       "https://www.pixiv.net/users/16391086",
       "https://twitter.com/iro_718",
       "https://iro718.tumblr.com"
@@ -264,6 +282,20 @@
     "artistNames": [
       "myabit",
       "@tokkihouse"
+    ]
+  },
+  {
+    "urls": [
+      "https://www.pixiv.net/users/394141",
+      "https://twitter.com/0nikoo0",
+      "https://skeb.jp/@0nikoo0",
+      "https://skeb.jp/@nikoo0"
+    ],
+    "artistNames": [
+      "nikoo"
+    ],
+    "circleNames": [
+      "瑠璃の涙"
     ]
   },
   {
@@ -440,7 +472,7 @@
   {
     "urls": [
       "https://www.pixiv.net/users/3862634",
-      "https://twitter.com/SL8610"
+      "https://twitter.com/sl8610"
     ],
     "artistNames": [
       "SL86"
@@ -659,6 +691,19 @@
     ]
   },
   {
+    "artistIndex": "アマトウ",
+    "urls": [
+      "https://www.pixiv.net/users/298982",
+      "https://twitter.com/amatou111"
+    ],
+    "artistNames": [
+      "甘党"
+    ],
+    "circleNames": [
+      "ひとみしり"
+    ]
+  },
+  {
     "artistIndex": "アムリタ",
     "urls": [
       "https://www.pixiv.net/users/12696633",
@@ -682,6 +727,16 @@
     ],
     "circleNames": [
       "あもちんち"
+    ]
+  },
+  {
+    "urls": [
+      "https://www.pixiv.net/users/4230590",
+      "https://twitter.com/B449_2020",
+      "https://skeb.jp/@B449_2020"
+    ],
+    "artistNames": [
+      "有栖川びぃ"
     ]
   },
   {
@@ -788,6 +843,15 @@
     ],
     "circleNames": [
       "もふれん亭"
+    ]
+  },
+  {
+    "artistIndex": "イチカ",
+    "urls": [
+      "https://www.pixiv.net/users/4002967"
+    ],
+    "artistNames": [
+      "イチカ"
     ]
   },
   {
@@ -1039,6 +1103,41 @@
     ]
   },
   {
+    "artistIndex": "オヤズリ",
+    "urls": [
+      "https://www.pixiv.net/users/1086859",
+      "https://twitter.com/Oyazuly",
+      "https://skeb.jp/@Oyazuly"
+    ],
+    "artistNames": [
+      "おやずり"
+    ]
+  },
+  {
+    "artistIndex": "オリトサチ",
+    "urls": [
+      "https://www.pixiv.net/users/34451999",
+      "https://twitter.com/oritosati"
+    ],
+    "artistNames": [
+      "織兎さち"
+    ],
+    "circleNames": [
+      "織兎屋"
+    ]
+  },
+  {
+    "artistIndex": "オリョウ",
+    "urls": [
+      "https://www.pixiv.net/users/24392",
+      "https://twitter.com/oryoillust",
+      "https://twitter.com/oryo"
+    ],
+    "artistNames": [
+      "おりょう"
+    ]
+  },
+  {
     "artistIndex": "カーボン",
     "urls": [
       "https://www.pixiv.net/users/1425707",
@@ -1116,6 +1215,15 @@
     ],
     "circleNames": [
       "ChicaLinda"
+    ]
+  },
+  {
+    "urls": [
+      "https://www.pixiv.net/users/11589991",
+      "https://twitter.com/pillow231303"
+    ],
+    "artistNames": [
+      "喝汽水涼貓"
     ]
   },
   {
@@ -1241,6 +1349,30 @@
     ],
     "artistNames": [
       "カリ助"
+    ]
+  },
+  {
+    "artistIndex": "カルカルメ",
+    "urls": [
+      "https://www.pixiv.net/users/16691139",
+      "https://twitter.com/krkrm_san"
+    ],
+    "artistNames": [
+      "かるかるめ"
+    ],
+    "circleNames": [
+      "砂糖漬けらいふ"
+    ]
+  },
+  {
+    "artistIndex": "カワイリツ",
+    "urls": [
+      "https://www.pixiv.net/users/27790467",
+      "https://twitter.com/rits_meg",
+      "https://skeb.jp/@rits_meg"
+    ],
+    "artistNames": [
+      "河藍葎"
     ]
   },
   {
@@ -1469,6 +1601,16 @@
     ]
   },
   {
+    "artistIndex": "コンブワカメ",
+    "urls": [
+      "https://www.pixiv.net/users/1076594",
+      "https://twitter.com/aconbwakame"
+    ],
+    "artistNames": [
+      "昆布わかめ"
+    ]
+  },
+  {
     "artistIndex": "サクラエビ",
     "urls": [
       "https://www.pixiv.net/users/9039230",
@@ -1613,6 +1755,19 @@
     ],
     "circleNames": [
       "Nanahoshi"
+    ]
+  },
+  {
+    "artistIndex": "シハン",
+    "urls": [
+      "https://www.pixiv.net/users/12505972",
+      "https://twitter.com/SyHan__"
+    ],
+    "artistNames": [
+      "しはん"
+    ],
+    "circleNames": [
+      "SYHAN__"
     ]
   },
   {
@@ -1883,6 +2038,15 @@
     ]
   },
   {
+    "artistIndex": "タビ",
+    "urls": [
+      "https://twitter.com/ukakoro2132"
+    ],
+    "artistNames": [
+      "たび"
+    ]
+  },
+  {
     "artistIndex": "タロウマル",
     "urls": [
       "https://www.pixiv.net/users/2039224",
@@ -1916,6 +2080,16 @@
     ]
   },
   {
+    "urls": [
+      "https://www.pixiv.net/users/14093123",
+      "https://twitter.com/gnk4649",
+      "https://skeb.jp/@gnk4649"
+    ],
+    "artistNames": [
+      "超暇神Z"
+    ]
+  },
+  {
     "artistIndex": "チョコアン",
     "urls": [
       "https://www.pixiv.net/users/5955130",
@@ -1937,6 +2111,20 @@
     ],
     "artistNames": [
       "津路宮"
+    ]
+  },
+  {
+    "artistIndex": "ツマヨウジ",
+    "urls": [
+      "https://www.pixiv.net/users/29835160",
+      "https://twitter.com/tumayoG",
+      "https://skeb.jp/@tumayoG"
+    ],
+    "artistNames": [
+      "つまようじ"
+    ],
+    "circleNames": [
+      "つまようじ文庫"
     ]
   },
   {
@@ -1967,6 +2155,16 @@
     ],
     "artistNames": [
       "丁ｕｎ"
+    ]
+  },
+  {
+    "artistIndex": "ヅス",
+    "urls": [
+      "https://www.pixiv.net/users/29203295",
+      "https://twitter.com/dusu__hachikuji"
+    ],
+    "artistNames": [
+      "づす"
     ]
   },
   {
@@ -2122,6 +2320,18 @@
     ],
     "circleNames": [
       "すけこまし"
+    ]
+  },
+  {
+    "artistIndex": "ナカノマル",
+    "urls": [
+      "https://www.pixiv.net/users/17332822",
+      "https://twitter.com/nakanomaru925",
+      "https://twitter.com/nakanosub925",
+      "https://skeb.jp/@nakano0829"
+    ],
+    "artistNames": [
+      "なかのまる"
     ]
   },
   {
@@ -2574,6 +2784,21 @@
     ]
   },
   {
+    "artistIndex": "ヒカリユイ",
+    "urls": [
+      "https://www.pixiv.net/users/21537571",
+      "https://twitter.com/yuiillust67",
+      "https://skeb.jp/@yuiillust67",
+      "https://hikari-yui-illust.tumblr.com"
+    ],
+    "artistNames": [
+      "光莉ゆい"
+    ],
+    "circleNames": [
+      "白紙の絵本"
+    ]
+  },
+  {
     "artistIndex": "ヒガシグレ",
     "urls": [
       "https://www.pixiv.net/users/8521905",
@@ -2621,6 +2846,17 @@
     ],
     "circleNames": [
       "そらひま"
+    ]
+  },
+  {
+    "artistIndex": "ヒナミリク",
+    "urls": [
+      "https://www.pixiv.net/users/29214710",
+      "https://twitter.com/hinamiriku",
+      "https://skeb.jp/@hinamiriku"
+    ],
+    "artistNames": [
+      "陽海りく"
     ]
   },
   {
@@ -2793,6 +3029,20 @@
     ]
   },
   {
+    "artistIndex": "ポメ",
+    "urls": [
+      "https://www.pixiv.net/users/51839895",
+      "https://twitter.com/pomesaurus",
+      "https://twitter.com/pomesubrus"
+    ],
+    "artistNames": [
+      "ポメ"
+    ],
+    "circleNames": [
+      "POMESAURUS"
+    ]
+  },
+  {
     "artistIndex": "ポン",
     "urls": [
       "https://www.pixiv.net/users/20671215",
@@ -2922,6 +3172,21 @@
     ]
   },
   {
+    "artistIndex": "ミズコシ",
+    "urls": [
+      "https://www.pixiv.net/users/8081125",
+      "https://twitter.com/mizukoshi14",
+      "https://skeb.jp/@mizukoshi14",
+      "https://mizukoshi.tumblr.com"
+    ],
+    "artistNames": [
+      "ミズコシ"
+    ],
+    "circleNames": [
+      "Pastel Craft"
+    ]
+  },
+  {
     "artistIndex": "ミヅキトーコ",
     "urls": [
       "https://www.pixiv.net/users/122730",
@@ -2942,6 +3207,17 @@
     ],
     "artistNames": [
       "ミツヤハチ太"
+    ]
+  },
+  {
+    "artistIndex": "ミックスター",
+    "urls": [
+      "https://www.pixiv.net/users/54225403",
+      "https://twitter.com/mixster777",
+      "https://skeb.jp/@mixster777"
+    ],
+    "artistNames": [
+      "みっくすたー"
     ]
   },
   {
@@ -2990,6 +3266,18 @@
     ],
     "artistNames": [
       "みゃい"
+    ]
+  },
+  {
+    "artistIndex": "ミルクリム",
+    "urls": [
+      "https://www.pixiv.net/users/6877068",
+      "https://twitter.com/369rim",
+      "https://skeb.jp/@369rim",
+      "https://369rim.tumblr.com"
+    ],
+    "artistNames": [
+      "みるくりむ"
     ]
   },
   {
@@ -3140,6 +3428,16 @@
     ]
   },
   {
+    "artistIndex": "モル",
+    "urls": [
+      "https://www.pixiv.net/users/31669839",
+      "https://twitter.com/morumoru_x"
+    ],
+    "artistNames": [
+      "もる"
+    ]
+  },
+  {
     "artistIndex": "ヤスナツ",
     "urls": [
       "https://www.pixiv.net/users/5718940",
@@ -3204,6 +3502,20 @@
     ],
     "circleNames": [
       "Orzコミュショーズ"
+    ]
+  },
+  {
+    "artistIndex": "ユキトラ",
+    "urls": [
+      "https://www.pixiv.net/users/72058010",
+      "https://twitter.com/kawus_tora",
+      "https://skeb.jp/@kawus_tora"
+    ],
+    "artistNames": [
+      "ゆきトラ"
+    ],
+    "circleNames": [
+      "おまえんち"
     ]
   },
   {
@@ -3406,6 +3718,15 @@
     "artistNames": [
       "んめもと",
       "んめもとさちこ"
+    ]
+  },
+  {
+    "urls": [
+      "https://www.pixiv.net/users/5163269",
+      "https://twitter.com/olys011"
+    ],
+    "artistNames": [
+      "오리신"
     ]
   }
 ]
