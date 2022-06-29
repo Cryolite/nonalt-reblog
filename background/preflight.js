@@ -20,7 +20,7 @@ async function matchImages(tabId, postUrl, postImages, images) {
         sources: postImages,
         targets: images
     }
-    const response = await fetch('http://localhost:5000/', {
+    const response = await fetch('http://localhost:5000/match', {
         method: 'POST',
         headers: {
             Accept: 'application/json, text/html',

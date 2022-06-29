@@ -17,7 +17,7 @@ _EXTENSION_ID = 'biiglkpcdjpendjobkhgoeflaejipmfg'
 
 app = flask.Flask(__name__)
 cors = flask_cors.CORS(app, resources={
-    r'/': {
+    r'/match': {
         'origins': [f'chrome-extension://{_EXTENSION_ID}'],
         'methods': ['POST'],
         'allow_headers': ['Content-Type']
@@ -120,7 +120,7 @@ def _getMatchScore(source_image: numpy.ndarray, target_image: numpy.ndarray) -> 
     return math.sqrt(match_score0 * match_score1)
 
 
-@app.route('/', methods=('POST',))
+@app.route('/match', methods=('POST',))
 def match():
     if flask.request.method != 'POST':
         return f'`{flask.request.method}` is not allowed.', 405
