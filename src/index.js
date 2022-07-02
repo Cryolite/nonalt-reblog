@@ -1,5 +1,5 @@
-import { getLeftMostPostUrlInInnerHtml, sendMessageToExtension } from "./common.js";
-import { createTab, executeScript } from "./background/common.js";
+import { getLeftMostPostUrlInInnerHtml, sendMessageToExtension } from "./common";
+import { createTab, executeScript } from "./background/common";
 
 (async () => {
     const postUrls = await (async () => {
@@ -84,7 +84,7 @@ import { createTab, executeScript } from "./background/common.js";
         const items = {};
         items['postUrlToImages'] = {};
         await chrome.storage.local.set(items);
-    
+
         const tabCandidates = await chrome.tabs.query({
             currentWindow: true,
             active: true,
@@ -97,7 +97,7 @@ import { createTab, executeScript } from "./background/common.js";
             throw new Error('Multiple tabs are found.');
         }
         const thisTabId = tabCandidates[0].id;
-    
+
         chrome.tabs.remove(thisTabId);
     });
 })();

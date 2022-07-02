@@ -13,7 +13,7 @@ nonaltReblog.preflight = false;
 
 import {
     sleep, getLeftMostPostUrlInInnerHtml, sendMessageToExtension
-} from 'chrome-extension://biiglkpcdjpendjobkhgoeflaejipmfg/common.js';
+} from './common';
 
 function getHrefsInInnerHtml(element) {
     const impl = (element, hrefs) => {

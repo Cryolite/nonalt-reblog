@@ -1,6 +1,6 @@
-import { sleep } from './common.js';
-import { executeScript, printError, createTab } from './background/common.js';
-import { preflightOnPost } from './background/preflight.js';
+import { sleep } from './common';
+import { executeScript, printError, createTab } from './background/common';
+import { preflightOnPost } from './background/preflight';
 
 const URLS = [
     'https://www.tumblr.com/dashboard'
@@ -38,7 +38,7 @@ async function createArtistTagger() {
         if (response.ok !== true) {
             throw new Error('Failed to read `artists.json`.')
         }
-    
+
         const artistsInfo = await response.json();
         for (const info of artistsInfo) {
             const artistNames = 'artistNames' in info ? info.artistNames : [];
@@ -251,7 +251,7 @@ async function dequeueForReblogging(tabId) {
                         }
                         return null;
                     }
-    
+
                     return impl(document);
                 },
                 args: [postId],
