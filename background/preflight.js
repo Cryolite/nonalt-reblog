@@ -1,12 +1,12 @@
 import { fetchImages } from '../common.js';
-import { printWarning, printError } from '../background/common.js';
+import { printInfo, printWarning, printError } from '../background/common.js';
 import * as pixiv from '../services/pixiv.js';
 import * as twitter from '../services/twitter.js';
 
-const serviceModules = [pixiv, twitter];
+const SERVICE_MODULES = [pixiv, twitter];
 
 async function getImages(tabId, hrefs, innerText) {
-    for (const serviceModule of serviceModules) {
+    for (const serviceModule of SERVICE_MODULES) {
         const images = await serviceModule.getImages(tabId, hrefs, innerText);
         if (images.length >= 1) {
             return images;
@@ -61,7 +61,7 @@ async function matchImages(tabId, postUrl, postImages, images) {
         const matchedImageUrl = matchedImage.imageUrl;
         const matchScore = matchResult.score;
         if (matchScore < 0.99) {
-            printError(tabId, `${postUrl}: Does not match to any image. A candidate is ${matchedImageUrl} (${matchScore}).`);
+            printWarning(tabId, `${postUrl}: Does not match to any image. A candidate is ${matchedImageUrl} (${matchScore}).`);
             return null;
         }
         matchedImages.push(matchedImage);
@@ -69,7 +69,40 @@ async function matchImages(tabId, postUrl, postImages, images) {
     return matchedImages;
 }
 
-async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, sendResponse)
+async function findInReblogQueue(imageUrl) {
+    if (typeof imageUrl !== 'string') {
+        throw Error(`${typeof imageUrl}: An invalid type.`);
+    }
+
+    const items = await chrome.storage.local.get('reblogQueue');
+    if ('reblogQueue' in items !== true) {
+        return false;
+    }
+    const reblogQueue = items.reblogQueue;
+
+    const imageUrls = reblogQueue.map(x => x.images).flat().map(x => x.imageUrl);
+    return imageUrls.includes(imageUrl);
+}
+
+async function findInLocalStorage(imageUrl) {
+    if (typeof imageUrl !== 'string') {
+        throw Error(`${typeof imageUrl}: An invalid type.`);
+    }
+
+    const items = await chrome.storage.local.get(imageUrl);
+    return imageUrl in items;
+}
+
+async function addEntryToPostUrlToImages(postUrl, images) {
+    const items = await chrome.storage.local.get('postUrlToImages');
+    if ('postUrlToImages' in items === false) {
+        items['postUrlToImages'] = {};
+    }
+    items['postUrlToImages'][postUrl] = images;
+    await chrome.storage.local.set(items);
+}
+
+async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
 {
     if (postImageUrls.length === 0) {
         throw new Error('postImageUrls.length === 0');
@@ -81,8 +114,7 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
         printWarning(tabId, `${postUrl}: Removed because any image URL could not be identified.`);
         sendResponse({
             errorMessage: null,
-            postUrl: postUrl,
-            matchedImages: null
+            imageUrls: []
         });
         return;
     }
@@ -91,39 +123,80 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
     if (Array.isArray(matchedImages) !== true) {
         sendResponse({
             errorMessage: null,
-            postUrl: postUrl,
-            matchedImages: null
+            imageUrls: []
         });
         return;
     }
 
     const matchedImageUrls = matchedImages.map(x => x.imageUrl);
     if ([...new Set(matchedImageUrls)].length != postImageUrls.length) {
-        printError(tabId, `${postUrl}: Multiple post images match to the same target image.`);
+        printWarning(tabId, `${postUrl}: Multiple post images match to the same target image.`);
         sendResponse({
             errorMessage: null,
-            postUrl: postUrl,
-            matchedImages: null
+            imageUrls: []
         });
         return;
     }
 
+    let allDuplicated = true;
+    for (const imageUrl of matchedImageUrls) {
+        checkForDuplication: {
+            if (imageUrls.includes(imageUrl) === true) {
+                printInfo(tabId, `${imageUrl}: Already detected in the dashboard.`);
+                break checkForDuplication;
+            }
+
+            imageUrls.push(imageUrl);
+
+            if (await findInReblogQueue(imageUrl) === true) {
+                printInfo(tabId, `${imageUrl}: Already queued to be reblogged.`);
+                break checkForDuplication;
+            }
+
+            if (await findInLocalStorage(imageUrl) === true) {
+                printInfo(tabId, `${imageUrl}: Already reblogged.`);
+                break checkForDuplication;
+            }
+
+            allDuplicated = false;
+            break checkForDuplication;
+        }
+        if (allDuplicated === false) {
+            break;
+        }
+    }
+    if (allDuplicated === true) {
+        printInfo(tabId, `  => ${postUrl}: Removed.`);
+        sendResponse({
+            errorMessage: null,
+            imageUrls: []
+        });
+        return;
+    }
+
+    printInfo(tabId, `${postUrl}: ${JSON.stringify(matchedImageUrls)}`);
+    {
+        const images = matchedImages.map(x => {
+            return {
+                artistUrl: x.artistUrl,
+                imageUrl: x.imageUrl
+            };
+        });
+        addEntryToPostUrlToImages(postUrl, images);
+    }
+
     sendResponse({
         errorMessage: null,
-        postUrl: postUrl,
-        matchedImages: matchedImages
+        imageUrls: matchedImageUrls
     });
 }
 
-export function preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, sendResponse)
+export function preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
 {
     try {
-        preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, sendResponse);
+        preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
     } catch (error) {
-        sendResponse({
-            errorMessage: error.message,
-            postUrl: postUrl,
-            matchImages: null
-        });
+        printError(tabId, `A fatal error in \`preflightOnPost\`: ${error.message}`);
+        throw error;
     }
 }

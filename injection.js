@@ -10,8 +10,6 @@ nonaltReblog.extensionId = null;
 
 nonaltReblog.activeElement = null;
 nonaltReblog.preflight = false;
-nonaltReblog.imageUrlChecks = {};
-nonaltReblog.postUrlToImages = {};
 
 import {
     sleep, getLeftMostPostUrlInInnerHtml, sendMessageToExtension
@@ -104,6 +102,10 @@ function getPostImageUrls(element) {
     return [...new Set(imageUrls)];
 }
 
+const POST_IMAGE_URLS = new Set();
+const IMAGE_URLS = new Set();
+const MESSAGES = [];
+
 async function initiatePreflight() {
     if (nonaltReblog.activeElement === null) {
         console.error('Press the `J` key (and possibly the `K` key afterwards) to set the starting position of preflight.')
@@ -111,10 +113,41 @@ async function initiatePreflight() {
     }
     let postElement = nonaltReblog.activeElement;
 
-    const deadline = Date.now() + 6 * 60 * 60 * 1000;
+    const dequeueMessages = async () => {
+        while (MESSAGES.length >= 1) {
+            console.info(`Message #${MESSAGES.length}`);
+
+            const message = MESSAGES[0];
+            MESSAGES.shift();
+            message.imageUrls = [...IMAGE_URLS];
+            const result = await sendMessageToExtension(message);
+            if ('errorMessage' in result !== true) {
+                throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+            }
+            if (result.errorMessage !== null) {
+                throw Error(result.errorMessage);
+            }
+            if ('imageUrls' in result !== true) {
+                throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+            }
+            if (Array.isArray(result.imageUrls) !== true) {
+                throw Error(`${typeof result.imageUrls}: An invalid type.`);
+            }
+            for (const imageUrl of result.imageUrls) {
+                IMAGE_URLS.add(imageUrl);
+            }
+        }
+    };
+
+    if (MESSAGES.length >= 1) {
+        await dequeueMessages();
+        nonaltReblog.preflight = false;
+        return;
+    }
+
+    let preflightPromise = null;
+    const deadline = Date.now() + 1 * 60 * 60 * 1000;
     while (nonaltReblog.preflight && Date.now() <= deadline) {
-        const messages = [];
-        const postUrlToElement = {};
         while (postElement.nextElementSibling !== null) {
             const previousPostElement = postElement;
             postElement = postElement.nextElementSibling;
@@ -122,7 +155,7 @@ async function initiatePreflight() {
                 console.assert(typeof postElement === 'object', typeof postElement);
                 throw new Error(`${typeof postElement}: An unexpected type.`);
             }
-            postElement.focus();
+            postElement.scrollIntoView();
 
             const postUrl = getLeftMostPostUrlInInnerHtml(previousPostElement);
             if (postUrl === null) {
@@ -157,7 +190,22 @@ async function initiatePreflight() {
                 continue;
             }
 
-            messages.push({
+            {
+                let allDetected = true;
+                for (const postImageUrl of postImageUrls) {
+                    if (POST_IMAGE_URLS.has(postImageUrl) !== true) {
+                        allDetected = false;
+                        break;
+                    }
+                }
+                if (allDetected === true) {
+                    console.info(`${postUrl}: Already detected in the dashboard.`);
+                    previousPostElement.remove();
+                    continue;
+                }
+            }
+
+            MESSAGES.push({
                 type: 'preflightOnPost',
                 tabId: nonaltReblog.tabId,
                 postUrl: postUrl,
@@ -165,165 +213,78 @@ async function initiatePreflight() {
                 hrefs: hrefs,
                 innerText: innerText
             });
-            postUrlToElement[postUrl] = previousPostElement;
+            previousPostElement.remove();
+
+            for (const postImageUrl of postImageUrls) {
+                POST_IMAGE_URLS.add(postImageUrl);
+            }
         }
 
-        if (messages.length === 0) {
-            await sleep(1000);
-            continue;
-        }
-
-        for (const message of messages) {
-            const result = await sendMessageToExtension(message);
-            if (result.errorMessage !== null) {
-                throw new Error(result.errorMessage);
+        const sleepDeadline = Date.now() + 1000;
+        while (true) {
+            if (MESSAGES.length >= 1 && preflightPromise === null) {
+                const message = MESSAGES[0];
+                MESSAGES.shift();
+                message.imageUrls = [...IMAGE_URLS];
+                preflightPromise = sendMessageToExtension(message);
             }
 
-            const postUrl = result.postUrl;
-            if (typeof postUrl !== 'string') {
-                throw new Error(`${typeof postUrl}: An invalid type.`);
+            if (Date.now() > sleepDeadline) {
+                break;
             }
 
-            const matchedImages = result.matchedImages;
-            if (Array.isArray(matchedImages) !== true) {
-                const elementToRemove = postUrlToElement[postUrl];
-                elementToRemove.remove();
+            const eventMultiplexer = [];
+            if (preflightPromise !== null) {
+                eventMultiplexer.push(preflightPromise);
+            }
+            const sleepPromise = sleep(Math.max(sleepDeadline - Date.now(), 0));
+            eventMultiplexer.push(sleepPromise);
+
+            const result = await Promise.race(eventMultiplexer);
+            if (typeof result === 'object') {
+                if ('errorMessage' in result !== true) {
+                    throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+                }
+                if (result.errorMessage !== null) {
+                    throw Error(result.errorMessage);
+                }
+                if ('imageUrls' in result !== true) {
+                    throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+                }
+                if (Array.isArray(result.imageUrls) !== true) {
+                    throw Error(`${typeof result.imageUrls}: An invalid type.`);
+                }
+                for (const imageUrl of result.imageUrls) {
+                    IMAGE_URLS.add(imageUrl);
+                }
+                preflightPromise = null;
                 continue;
             }
-
-            const matchedImageUrls = matchedImages.map(x => x.imageUrl);
-
-            let allDuplicated = true;
-            for (const imageUrl of matchedImageUrls) {
-                checkForDuplication: {
-                    if (imageUrl in nonaltReblog.imageUrlChecks) {
-                        if (nonaltReblog.imageUrlChecks[imageUrl] === postUrl) {
-                            nonaltReblog.preflight = false;
-                            console.assert(nonaltReblog.imageUrlChecks[imageUrl] !== postUrl, postUrl, imageUrl);
-                            return;
-                        }
-                        console.info(`${imageUrl}: Already detected in the dashboard.`);
-                        break checkForDuplication;
-                    }
-
-                    nonaltReblog.imageUrlChecks[imageUrl] = postUrl;
-
-                    {
-                        const result = await sendMessageToExtension({
-                            type: 'findInReblogQueue',
-                            key: imageUrl
-                        });
-                        if (result.errorMessage !== null) {
-                            nonaltReblog.preflight = false;
-                            throw new Error(result.errorMessage);
-                        }
-                        if (result.found === true) {
-                            console.info(`${imageUrl}: Already queued to be reblogged.`);
-                            break checkForDuplication;
-                        }
-                    }
-
-                    {
-                        const result = await sendMessageToExtension({
-                            type: 'findInLocalStorage',
-                            key: imageUrl
-                        });
-                        if (result.errorMessage !== null) {
-                            nonaltReblog.preflight = false;
-                            throw new Error(result.errorMessage);
-                        }
-                        if (result.found === true) {
-                            console.info(`${imageUrl}: Already reblogged.`);
-                            break checkForDuplication;
-                        }
-                    }
-
-                    allDuplicated = false;
-                    break checkForDuplication;
-                }
-                if (allDuplicated === false) {
-                    break;
-                }
-            }
-            if (allDuplicated === true) {
-                console.info(`  => ${postUrl}: Removed.`);
-                const elementToRemove = postUrlToElement[postUrl];
-                elementToRemove.remove();
-                continue;
-            }
-
-            console.info(`${postUrl}: ${JSON.stringify(matchedImageUrls)}`);
-            nonaltReblog.postUrlToImages[postUrl] = matchedImages.map(x => {
-                return {
-                    artistUrl: x.artistUrl,
-                    imageUrl: x.imageUrl
-                };
-            });
         }
     }
+    if (preflightPromise !== null) {
+        const result = await preflightPromise;
+        if ('errorMessage' in result !== true) {
+            throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+        }
+        if (result.errorMessage !== null) {
+            throw Error(result.errorMessage);
+        }
+        if ('imageUrls' in result !== true) {
+            throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
+        }
+        if (Array.isArray(result.imageUrls) !== true) {
+            throw Error(`${typeof result.imageUrls}: An invalid type.`);
+        }
+        for (const imageUrl of result.imageUrls) {
+            IMAGE_URLS.add(imageUrl);
+        }
+        preflightPromise = null;
+    }
+
+    await dequeueMessages();
 
     nonaltReblog.preflight = false;
-}
-
-async function queueForReblogging(event) {
-    const target = event.target;
-    if (target === null) {
-        return;
-    }
-
-    const postUrl = getLeftMostPostUrlInInnerHtml(target);
-    if (typeof postUrl !== 'string') {
-        console.warn(`Failed to get the post URL.`);
-        return;
-    }
-
-    if (postUrl in nonaltReblog.postUrlToImages === false) {
-        console.warn(`${postUrl}: Execute preflight first.`);
-        return;
-    }
-    const images = nonaltReblog.postUrlToImages[postUrl];
-    if (images.length === 0) {
-        console.assert(images.length >= 1);
-        return;
-    }
-
-    const imageUrls = images.map(x => x.imageUrl);
-    let allFound = true;
-    for (const imageUrl of imageUrls) {
-        const result = await sendMessageToExtension({
-            type: 'findInLocalStorage',
-            key: imageUrl
-        });
-        if (result.errorMessage !== null) {
-            console.error(result.errorMessage);
-            return;
-        }
-        const found = result.found;
-        if (typeof found !== 'boolean') {
-            console.error(`${typeof found}: An invalid type.`);
-            return;
-        }
-        if (found === false) {
-            allFound = false;
-            break;
-        }
-    }
-    if (allFound === true) {
-        if (imageUrls.length === 1) {
-            console.info(`${postUrl}: The image has been already reblogged.`);
-        }
-        else {
-            console.info(`${postUrl}: All the images have been already reblogged.`);
-        }
-        return;
-    }
-
-    sendMessageToExtension({
-        type: 'queueForReblogging',
-        tabId: nonaltReblog.tabId,
-        postUrl: postUrl,
-        images: images
-    });
 }
 
 document.addEventListener('keydown', event => {
@@ -340,9 +301,6 @@ document.addEventListener('keydown', event => {
         return;
     }
     if (event.code !== 'KeyJ') {
-        return;
-    }
-    if (event.sourceCapabilities === null) {
         return;
     }
     if (nonaltReblog.preflight === true) {
@@ -370,9 +328,6 @@ document.addEventListener('keydown', event => {
         return;
     }
     if (event.code !== 'KeyK') {
-        return;
-    }
-    if (event.sourceCapabilities === null) {
         return;
     }
     if (nonaltReblog.preflight === true) {
@@ -414,20 +369,12 @@ document.addEventListener('keydown', async event => {
     if (event.code !== 'KeyP') {
         return;
     }
-    if (event.sourceCapabilities === null) {
-        return;
-    }
 
     if (nonaltReblog.preflight === false) {
         nonaltReblog.preflight = true;
         const startTime = Math.floor(Date.now() / 1000);
         initiatePreflight().finally(() => {
             nonaltReblog.preflight = false;
-
-            sendMessageToExtension({
-                type: 'savePostUrlToImages',
-                postUrlToImages: nonaltReblog.postUrlToImages
-            });
 
             let elapsedSeconds = Math.floor(Date.now() / 1000) - startTime;
             const elapsedHours = Math.floor(elapsedSeconds / 3600);
@@ -455,36 +402,7 @@ document.addEventListener('keydown', async event => {
     if (event.metaKey) {
         return;
     }
-    if (event.code !== 'KeyR') {
-        return;
-    }
-    if (event.sourceCapabilities === null) {
-        return;
-    }
-    if (nonaltReblog.preflight === true) {
-        return;
-    }
-
-    queueForReblogging(event);
-});
-
-document.addEventListener('keydown', async event => {
-    if (event.shiftKey) {
-        return;
-    }
-    if (event.ctrlKey) {
-        return;
-    }
-    if (event.altKey) {
-        return;
-    }
-    if (event.metaKey) {
-        return;
-    }
     if (event.code !== 'KeyQ') {
-        return;
-    }
-    if (event.sourceCapabilities === null) {
         return;
     }
     if (nonaltReblog.preflight === true) {

@@ -1,19 +1,10 @@
 import { sleep } from './common.js';
-import { executeScript, createTab } from './background/common.js';
+import { executeScript, printError, createTab } from './background/common.js';
 import { preflightOnPost } from './background/preflight.js';
 
 const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
-
-async function savePostUrlToImages(postUrlToImages) {
-    const items = await chrome.storage.local.get('postUrlToImages');
-    if ('postUrlToImages' in items === false) {
-        items['postUrlToImages'] = {};
-    }
-    Object.assign(items['postUrlToImages'], postUrlToImages);
-    await chrome.storage.local.set(items);
-}
 
 async function queueForReblogging(tabId, postUrl, images, sendResponse) {
     const items = await chrome.storage.local.get('reblogQueue');
@@ -622,109 +613,45 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return false;
     }
 
-    if (type === 'findInReblogQueue') {
-        const key = message.key;
-        if (typeof key !== 'string') {
-            console.assert(typeof key === 'string', typeof key);
-            sendResponse({
-                errorMessage: `${typeof key}: An invalid type.`
-            });
-            return false;
-        }
-
-        (async () => {
-            const items = await chrome.storage.local.get('reblogQueue');
-            if ('reblogQueue' in items !== true) {
-                sendResponse({
-                    errorMessage: null,
-                    found: false
-                });
-                return;
-            }
-            const reblogQueue = items.reblogQueue;
-
-            const imageUrls = reblogQueue.map(x => x.images).flat().map(x => x.imageUrl);
-            sendResponse({
-                errorMessage: null,
-                found: imageUrls.includes(key)
-            });
-        })();
-
-        return true;
-    }
-
-    if (type === 'findInLocalStorage') {
-        const key = message.key;
-        if (typeof key !== 'string') {
-            console.assert(typeof key === 'string', typeof key);
-            sendResponse({
-                errorMessage: `${typeof key}: An invalid type.`
-            });
-            return false;
-        }
-
-        chrome.storage.local.get(key).then(items => {
-            sendResponse({
-                errorMessage: null,
-                found: key in items
-            });
-        });
-        return true;
-    }
-
     if (type === 'preflightOnPost') {
         const tabId = message.tabId;
         if (typeof tabId !== 'number') {
             console.assert(typeof tabId !== 'number', typeof tabId);
             sendResponse({
-                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`
+                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`,
+                imageUrls: []
             });
             return false;
         }
 
         const postUrl = message.postUrl;
         if (typeof postUrl !== 'string') {
-            console.assert(typeof postUrl === 'string', typeof postUrl);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: postUrl => { console.assert(typeof postUrl === 'string', typeof postUrl); },
-                args: [postUrl]
-            });
+            const errorMessage = `${typeof postUrl}: An invalid type.`;
+            printError(tabId, errorMessage);
             sendResponse({
-                errorMessage: `${typeof postUrl}: An invalid type.`
+                errorMessage: errorMessage,
+                imageUrls: []
             });
             return false;
         }
 
         const postImageUrls = message.postImageUrls;
         if (Array.isArray(postImageUrls) !== true) {
-            console.assert(Array.isArray(postImageUrls), typeof postImageUrls);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: postImageUrls => console.assert(Array.isArray(postImageUrls), typeof postImageUrls),
-                args: [postImageUrls]
-            });
+            const errorMessage = `${typeof postImageUrls}: An invalid type.`;
+            printError(tabId, errorMessage);
             sendResponse({
-                errorMessage: `${typeof postImageUrls}: An invalid type.`
+                errorMessage: errorMessage,
+                imageUrls: []
             });
             return false;
         }
         for (const postImageUrl of postImageUrls) {
             if (typeof postImageUrl !== 'string') {
-                console.assert(typeof postImageUrl === 'string', typeof postImageUrl);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: postImageUrl => console.assert(typeof postImageUrl === 'string', typeof postImageUrl),
-                    args: [postImageUrl]
-                });
+                const errorMessage = `${typeof postImageUrl}: An invalid type.`;
+                printError(tabId, errorMessage);
                 sendResponse({
-                    errorMessage: `${typeof postImageUrl}: An invalid type.`
+                    errorMessage: errorMessage,
+                    imageUrls: []
                 });
                 return false;
             }
@@ -732,31 +659,21 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
         const hrefs = message.hrefs;
         if (Array.isArray(hrefs) !== true) {
-            console.assert(Array.isArray(hrefs), typeof hrefs);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: hrefs => console.assert(Array.isArray(hrefs), typeof hrefs),
-                args: [hrefs]
-            });
+            const errorMessage = `${typeof hrefs}: An invalid type.`;
+            printError(tabId, errorMessage);
             sendResponse({
-                errorMessage: `${typeof hrefs}: An invalid type.`
+                errorMessage: errorMessage,
+                imageUrls: []
             });
             return false;
         }
         for (const href in hrefs) {
             if (typeof href !== 'string') {
-                console.assert(typeof href === 'string', typeof href);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: href => { console.assert(typeof href === 'string', typeof href); },
-                    args: [href]
-                });
+                const errorMessage = `${typeof href}: An invalid type.`;
+                printError(tabId, errorMessage);
                 sendResponse({
-                    errorMessage: `${typeof href}: An invalid type.`
+                    errorMessage: errorMessage,
+                    imageUrls: []
                 });
                 return false;
             }
@@ -764,71 +681,38 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
         const innerText = message.innerText;
         if (typeof innerText !== 'string') {
-            console.assert(typeof innerText === 'string', typeof innerText);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: innerText => console.assert(typeof innerText === 'string', typeof innerText),
-                args: [innerText]
-            });
+            const errorMessage = `${typeof innerText}: An invalid type.`;
+            printError(tabId, errorMessage);
             sendResponse({
-                errorMessage: `${typeof innerText}: An invalid type.`
+                errorMessage: errorMessage,
+                imageUrls: []
             });
             return false;
         }
 
-        preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, sendResponse);
-        return true;
-    }
-
-    if (type === 'savePostUrlToImages') {
-        const postUrlToImages = message.postUrlToImages;
-        if (typeof postUrlToImages !== 'object') {
-            console.assert(typeof postUrlToImages === 'object', typeof postUrlToImages);
+        const imageUrls = message.imageUrls;
+        if (Array.isArray(imageUrls) !== true) {
+            const errorMessage = `${typeof imageUrls}: An invalid type.`;
+            printError(tabId, errorMessage);
             sendResponse({
-                errorMessage: `${typeof postUrlToImages}: An invalid type for \`postUrlToImages\`.`
+                errorMessage: errorMessage,
+                imageUrls: []
             });
             return false;
         }
-        for (const [postUrl, images] of Object.entries(postUrlToImages)) {
-            if (typeof postUrl !== 'string') {
-                console.assert(typeof postUrl === 'string', typeof postUrl);
+        for (const imageUrl of imageUrls) {
+            if (typeof imageUrl !== 'string') {
+                const errorMessage = `${typeof imageUrl}: An invalid type.`;
+                printError(tabId, errorMessage);
                 sendResponse({
-                    errorMessage: `${typeof postUrl}: An invalid type for \`postUrl\`.`
+                    errorMessage: errorMessage,
+                    imageUrls: []
                 });
                 return false;
-            }
-
-            if (Array.isArray(images) !== true) {
-                console.assert(Array.isArray(images) === true, typeof images);
-                sendResponse({
-                    errorMessage: `${typeof images}: An invalid type for \`images\`.`
-                });
-                return false;
-            }
-            for (const image of images) {
-                const artistUrl = image.artistUrl;
-                if (typeof artistUrl !== 'string') {
-                    console.assert(typeof artistUrl === 'string', typeof artistUrl);
-                    sendResponse({
-                        errorMessage: `${typeof artistUrl}: An invalid type for \`artistUrl\`.`
-                    });
-                    return false;
-                }
-
-                const imageUrl = image.imageUrl;
-                if (typeof imageUrl !== 'string') {
-                    console.assert(typeof imageUrl === 'string', typeof imageUrl);
-                    sendResponse({
-                        errorMessage: `${typeof imageUrl}: An invalid type for \`imageUrl\`.`
-                    });
-                    return false;
-                }
             }
         }
 
-        savePostUrlToImages(postUrlToImages);
+        preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
         return true;
     }
 
