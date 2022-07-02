@@ -1,12 +1,11 @@
-export async function executeScript(scriptInjection) {
+export async function executeScript<T extends unknown[]>(scriptInjection: chrome.scripting.ScriptInjection<T>): Promise<unknown> {
     const injectionResults = await chrome.scripting.executeScript(scriptInjection);
+    console.assert(injectionResults.length === 1, injectionResults.length);
     if (injectionResults.length === 0) {
-        console.assert(injectionResults.length === 1, injectionResults.length);
         const error = new Error('Script injection failed.');
         throw error;
     }
     if (injectionResults.length >= 2) {
-        console.assert(injectionResults.length === 1, injectionResults.length);
         const error = new Error(`Unintended script injection into ${injectionResults.length} frames.`);
         throw error;
     }
@@ -14,7 +13,7 @@ export async function executeScript(scriptInjection) {
     return injectionResult.result;
 }
 
-export function printInfo(tabId, message) {
+export function printInfo(tabId: number, message: string): void {
     executeScript({
         target: {
             tabId: tabId
@@ -24,7 +23,7 @@ export function printInfo(tabId, message) {
     });
 }
 
-export function printWarning(tabId, message) {
+export function printWarning(tabId: number, message: string): void {
     executeScript({
         target: {
             tabId: tabId
@@ -34,7 +33,7 @@ export function printWarning(tabId, message) {
     });
 }
 
-export function printError(tabId, message) {
+export function printError(tabId: number, message: string): void {
     executeScript({
         target: {
             tabId: tabId
@@ -46,8 +45,8 @@ export function printError(tabId, message) {
 
 // Create a new tab and wait for the resource loading for the page on that tab
 // to complete.
-export async function createTab(createProperties) {
-    if ('openerTabId' in createProperties && 'windowId' in createProperties === false) {
+export async function createTab(createProperties: chrome.tabs.CreateProperties): Promise<chrome.tabs.Tab> {
+    if (createProperties.openerTabId !== undefined && createProperties.windowId === undefined) {
         const openerTabId = createProperties.openerTabId;
         const openerTab = await chrome.tabs.get(openerTabId);
         const windowId = openerTab.windowId;
@@ -56,7 +55,7 @@ export async function createTab(createProperties) {
 
     const tab = await chrome.tabs.create(createProperties);
 
-    const promise = new Promise((resolve, reject) => {
+    const promise = new Promise<chrome.tabs.Tab>((resolve, reject) => {
         chrome.webNavigation.onCompleted.addListener(details => {
             if (details.tabId !== tab.id) {
                 return;
