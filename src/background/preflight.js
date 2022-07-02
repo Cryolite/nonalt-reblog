@@ -1,7 +1,7 @@
-import { fetchImages } from '../common.js';
-import { printInfo, printWarning, printError } from '../background/common.js';
-import * as pixiv from '../services/pixiv.js';
-import * as twitter from '../services/twitter.js';
+import { fetchImages } from '../common';
+import { printInfo, printWarning, printError } from '../background/common';
+import * as pixiv from '../services/pixiv';
+import * as twitter from '../services/twitter';
 
 const SERVICE_MODULES = [pixiv, twitter];
 

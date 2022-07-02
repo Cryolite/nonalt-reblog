@@ -1,5 +1,5 @@
-import { fetchImages } from '../common.js'
-import { executeScript, createTab } from '../background/common.js'
+import { fetchImages } from '../common'
+import { executeScript, createTab } from '../background/common'
 
 async function expandPixivArtworks(tabId) {
     await executeScript({

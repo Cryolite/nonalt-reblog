@@ -1,5 +1,5 @@
-import { sleep, fetchImages } from '../common.js'
-import { executeScript, createTab } from '../background/common.js'
+import { sleep, fetchImages } from '../common'
+import { executeScript, createTab } from '../background/common'
 
 async function followTwitterShortUrl(url) {
     if (/^https:\/\/t\.co\/[0-9A-Za-z]+$/.test(url) !== true) {
