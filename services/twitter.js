@@ -20,6 +20,121 @@ async function followTwitterShortUrl(url) {
     return match[1];
 }
 
+async function waitForTweetToAppear(url, tabId, interval, timeout) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        {
+            const result = await executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: () => {
+                    const findFirstElement = element => {
+                        block: {
+                            if (typeof element.nodeName !== 'string') {
+                                break block;
+                            }
+                            if (element.nodeName.toUpperCase() !== 'DIV') {
+                                break block;
+                            }
+
+                            if (typeof element.ariaLabel !== 'string') {
+                                break block;
+                            }
+                            if (element.ariaLabel !== 'タイムライン: トレンド') {
+                                break block;
+                            }
+
+                            return element;
+                        }
+
+                        if (typeof element.children !== 'object') {
+                            return null;
+                        }
+                        for (const child of element.children) {
+                            const result = findFirstElement(child);
+                            if (result !== null) {
+                                return result;
+                            }
+                        }
+                        return null;
+                    };
+
+                    const firstElement = findFirstElement(document);
+                    if (firstElement === null) {
+                        return false;
+                    }
+
+                    const findSecondElement = element => {
+                        block: {
+                            if (typeof element.nodeName !== 'string') {
+                                break block;
+                            }
+                            if (element.nodeName.toUpperCase() !== 'SPAN') {
+                                break block;
+                            }
+
+                            if (typeof element.innerText !== 'string') {
+                                break block;
+                            }
+                            if (element.innerText !== 'いまどうしてる？') {
+                                break block;
+                            }
+
+                            return true;
+                        }
+
+                        if (typeof element.children !== 'object') {
+                            return false;
+                        }
+                        for (const child of element.children) {
+                            if (findSecondElement(child) === true) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    };
+
+                    return findSecondElement(firstElement);
+                },
+                world: 'MAIN'
+            });
+            if (result === true) {
+                return;
+            }
+        }
+
+        {
+            const innerText = await executeScript({
+                target: {
+                    tabId: tabId
+                },
+                func: () => document.body.innerText,
+                world: 'MAIN'
+            });
+            if (innerText.indexOf('このページは存在しません。他のページを検索してみましょう。') !== -1) {
+                console.warn(`${url}: Does not exist.`);
+                return;
+            }
+        }
+
+        await sleep(interval);
+    }
+
+    // Resource loading for the page sometimes takes a long time. In such cases,
+    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
+    // injection stops the resource loading for the page.
+    await executeScript({
+        target: {
+            tabId: tabId
+        },
+        func: () => window.stop(),
+        world: 'MAIN'
+    });
+
+    console.warn(`${url}: Timeout in \`waitForTweetToAppear\`.`);
+}
+
 async function getTwitterImagesImpl(tabId, sourceUrl, images) {
     // To retrieve the URL of the original images from a Twitter tweet URL, open
     // the tweet page in the foreground, wait a few seconds, and extract the
@@ -29,21 +144,8 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
         url: sourceUrl,
         active: true
     });
-    // Resource loading for the page sometimes takes a long time. In such cases,
-    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
-    // injection sets a time limit on resource loading for the page.
-    await executeScript({
-        target: {
-            tabId: newTab.id
-        },
-        func: () => {
-            setTimeout(() => {
-                window.stop();
-            }, 60 * 1000);
-        },
-        world: 'MAIN'
-    });
-    await sleep(5 * 1000);
+
+    await waitForTweetToAppear(sourceUrl, newTab.id, 100, 60 * 1000);
 
     const artistUrl = (() => {
         const pattern = /^https:\/\/twitter\.com\/[0-9A-Z_a-z]+/;
@@ -83,6 +185,9 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
 
     const originalImageUrlsUniqued = [...new Set(originalImageUrls)];
     const newImages = await fetchImages(originalImageUrlsUniqued, sourceUrl);
+    if (newImages.length === 0) {
+        console.warn(`${sourceUrl}: No image URL found.`);
+    }
     for (const newImage of newImages) {
         newImage.artistUrl = artistUrl;
         images.push(newImage);
