@@ -12,18 +12,15 @@ import flask
 import flask_cors
 
 
-_EXTENSION_ID = 'biiglkpcdjpendjobkhgoeflaejipmfg'
-
-
 app = flask.Flask(__name__)
 cors = flask_cors.CORS(app, resources={
     r'/match': {
-        'origins': [f'chrome-extension://{_EXTENSION_ID}'],
+        'origins': ['chrome-extension://*'],
         'methods': ['POST'],
         'allow_headers': ['Content-Type']
     },
     r'/proxy-to-pixiv': {
-        'origins': [f'chrome-extension://{_EXTENSION_ID}'],
+        'origins': ['chrome-extension://*'],
         'methods': ['POST'],
         'allow_headers': ['Content-Type']
     }
