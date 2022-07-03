@@ -1,14 +1,11 @@
+// In order to avoid name conflicts, all global variables used in this injected
+// script are defined as a property of the object `window.nonaltReblog`.
 if ('nonaltReblog' in window === false) {
-    // The presence of `window.nonaltReblog` determines whether this script
-    // has been already injected into this page or not.
+    // The presence of `window.nonaltReblog` determines whether this script has
+    // been already injected into this page or not.
     window.nonaltReblog = {};
 }
-
-// When this script is injected into https://www.tumblr.com/dashboard, the tab
-// ID for the page is assigned to the following property.
 nonaltReblog.tabId = null;
-
-// Likewise, the extension ID is assigned to the following property.
 nonaltReblog.extensionId = null;
 
 nonaltReblog.activeElement = null;
@@ -123,7 +120,7 @@ async function initiatePreflight() {
             const message = MESSAGES[0];
             MESSAGES.shift();
             message.imageUrls = [...IMAGE_URLS];
-            const result = await sendMessageToExtension(nonaltReblog.extensionId, message);
+            const result = await sendMessageToExtension(message);
             if ('errorMessage' in result !== true) {
                 throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
             }
@@ -229,7 +226,7 @@ async function initiatePreflight() {
                 const message = MESSAGES[0];
                 MESSAGES.shift();
                 message.imageUrls = [...IMAGE_URLS];
-                preflightPromise = sendMessageToExtension(nonaltReblog.extensionId, message);
+                preflightPromise = sendMessageToExtension(message);
             }
 
             if (Date.now() > sleepDeadline) {
@@ -412,7 +409,7 @@ document.addEventListener('keydown', async event => {
         return;
     }
 
-    sendMessageToExtension(nonaltReblog.extensionId, {
+    sendMessageToExtension({
         type: 'dequeueForReblogging',
         tabId: nonaltReblog.tabId
     });

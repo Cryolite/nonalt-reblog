@@ -3,7 +3,7 @@ import { createTab, executeScript } from "./background/common";
 
 (async () => {
     const postUrls = await (async () => {
-        const result = await sendMessageToExtension(chrome.runtime.id, {
+        const result = await sendMessageToExtension({
             type: 'loadPostUrlToImages'
         });
         if (result.errorMessage !== null) {

@@ -51,9 +51,11 @@ export function getLeftMostPostUrlInInnerHtml(element) {
     return null;
 }
 
-export function sendMessageToExtension(extensionId, message) {
+const EXTENSION_ID = 'biiglkpcdjpendjobkhgoeflaejipmfg';
+
+export function sendMessageToExtension(message) {
     const promise = new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(extensionId, message, result => {
+        chrome.runtime.sendMessage(EXTENSION_ID, message, result => {
             if (result === undefined) {
                 const lastError = JSON.stringify(chrome.runtime.lastError);
                 console.error(lastError);
