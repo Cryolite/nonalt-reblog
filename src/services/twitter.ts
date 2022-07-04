@@ -1,26 +1,26 @@
-import { sleep, fetchImages } from '../common'
+import { sleep, fetchImages, Image } from '../common'
 import { executeScript, createTab } from '../background/common'
 
-async function followTwitterShortUrl(url) {
+async function followTwitterShortUrl(url: string): Promise<string | null> {
     if (/^https:\/\/t\.co\/[0-9A-Za-z]+$/.test(url) !== true) {
         throw new Error(`${url}: An invalid URL.`);
     }
 
     const response = await fetch(url);
     if (response.ok !== true) {
-        throw new Error(`${url}: Failed to fetch (${url.status}).`);
+        throw new Error(`${url}: Failed to fetch (${response.status}).`);
     }
 
     const responseBody = await response.text();
     const sourceUrlPattern = /(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
     const match = sourceUrlPattern.exec(responseBody);
-    if (Array.isArray(match) !== true) {
+    if (match === null) {
         return null;
     }
     return match[1];
 }
 
-async function waitForTweetToAppear(url, tabId, interval, timeout) {
+async function waitForTweetToAppear(url: string, tabId: number, interval: number, timeout: number): Promise<void> {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
         {
@@ -29,28 +29,17 @@ async function waitForTweetToAppear(url, tabId, interval, timeout) {
                     tabId: tabId
                 },
                 func: () => {
-                    const findFirstElement = element => {
+                    const findFirstElement = (element: Element): Element | null => {
                         block: {
-                            if (typeof element.nodeName !== 'string') {
-                                break block;
-                            }
-                            if (element.nodeName.toUpperCase() !== 'DIV') {
-                                break block;
-                            }
-
-                            if (typeof element.ariaLabel !== 'string') {
+                            if (element.nodeName !== 'DIV') {
                                 break block;
                             }
                             if (element.ariaLabel !== 'タイムライン: トレンド') {
                                 break block;
                             }
-
                             return element;
                         }
 
-                        if (typeof element.children !== 'object') {
-                            return null;
-                        }
                         for (const child of element.children) {
                             const result = findFirstElement(child);
                             if (result !== null) {
@@ -60,24 +49,22 @@ async function waitForTweetToAppear(url, tabId, interval, timeout) {
                         return null;
                     };
 
-                    const firstElement = findFirstElement(document);
+                    const firstElement = findFirstElement(document.body);
                     if (firstElement === null) {
                         return false;
                     }
 
-                    const findSecondElement = element => {
+                    const findSecondElement = (element: Element): boolean => {
                         block: {
-                            if (typeof element.nodeName !== 'string') {
+                            if (element.nodeName !== 'SPAN') {
                                 break block;
                             }
-                            if (element.nodeName.toUpperCase() !== 'SPAN') {
-                                break block;
-                            }
+                            const span = element as HTMLSpanElement;
 
-                            if (typeof element.innerText !== 'string') {
+                            if (typeof span.innerText !== 'string') {
                                 break block;
                             }
-                            if (element.innerText !== 'いまどうしてる？') {
+                            if (span.innerText !== 'いまどうしてる？') {
                                 break block;
                             }
 
@@ -135,7 +122,7 @@ async function waitForTweetToAppear(url, tabId, interval, timeout) {
     console.warn(`${url}: Timeout in \`waitForTweetToAppear\`.`);
 }
 
-async function getTwitterImagesImpl(tabId, sourceUrl, images) {
+async function getTwitterImagesImpl(tabId: number, sourceUrl: string, images: Image[]): Promise<void> {
     // To retrieve the URL of the original images from a Twitter tweet URL, open
     // the tweet page in the foreground, wait a few seconds, and extract the
     // URLs from the `images`.
@@ -144,13 +131,14 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
         url: sourceUrl,
         active: true
     });
+    const newTabId = newTab.id!;
 
-    await waitForTweetToAppear(sourceUrl, newTab.id, 100, 60 * 1000);
+    await waitForTweetToAppear(sourceUrl, newTabId, 100, 60 * 1000);
 
     const artistUrl = (() => {
         const pattern = /^https:\/\/twitter\.com\/[0-9A-Z_a-z]+/;
         const match = pattern.exec(sourceUrl);
-        if (Array.isArray(match) !== true) {
+        if (match === null) {
             throw new Error(`${sourceUrl}: An invalid source URL.`);
         }
         return match[0];
@@ -158,7 +146,7 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
 
     const imageUrls = await executeScript({
         target: {
-            tabId: newTab.id
+            tabId: newTabId
         },
         func: () => {
             const images = [];
@@ -189,20 +177,22 @@ async function getTwitterImagesImpl(tabId, sourceUrl, images) {
         console.warn(`${sourceUrl}: No image URL found.`);
     }
     for (const newImage of newImages) {
-        newImage.artistUrl = artistUrl;
-        images.push(newImage);
+        images.push({
+            ...newImage,
+            artistUrl
+        });
     }
 
-    chrome.tabs.remove(newTab.id);
+    chrome.tabs.remove(newTabId);
 }
 
-export async function getImages(tabId, hrefs, innerText) {
+export async function getImages(tabId: number, hrefs: string[], innerText: string): Promise<Image[]> {
     const sourceUrls = [];
     {
         const sourceUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/twitter\.com\/[^\/]+\/status\/\d+)/;
         for (const href of hrefs) {
             const matches = sourceUrlPattern.exec(href);
-            if (Array.isArray(matches) !== true) {
+            if (matches === null) {
                 continue;
             }
             sourceUrls.push(matches[1]);
@@ -212,7 +202,7 @@ export async function getImages(tabId, hrefs, innerText) {
         const shortUrlPattern = /^https:\/\/href\.li\/\?(https:\/\/t\.co\/[0-9A-Za-z]+)/;
         for (const href of hrefs) {
             const shortMatches = shortUrlPattern.exec(href);
-            if (Array.isArray(shortMatches) === true) {
+            if (shortMatches !== null) {
                 const sourceUrl = await followTwitterShortUrl(shortMatches[1]);
                 if (typeof sourceUrl === 'string') {
                     sourceUrls.push(sourceUrl);
@@ -238,7 +228,7 @@ export async function getImages(tabId, hrefs, innerText) {
         }
     }
 
-    const images = [];
+    const images: Image[] = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
         await getTwitterImagesImpl(tabId, sourceUrl, images);
     }

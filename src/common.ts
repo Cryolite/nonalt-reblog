@@ -1,10 +1,28 @@
-export async function sleep(milliseconds) {
-    if (typeof milliseconds !== 'number') {
-        console.assert(typeof milliseconds === 'number', typeof milliseconds);
-        throw new Error(`${typeof milliseconds}: An invalid type.`);
-    }
+export interface PostImage {
+    imageUrl: string;
+    mime: string | null;
+    blob: string;
+}
 
-    const promise = new Promise((resolve, reject) => {
+export interface Image {
+    imageUrl: string;
+    artistUrl: string;
+}
+
+export interface ReblogQueue {
+    postUrl: string;
+    images: Image[];
+}
+
+export interface LocalStorageData {
+    // TODO: Consider storing image URLs in a subitem.
+    [imageUrl: string]: Date | ReblogQueue[] | Record<string, Image[]> | undefined;
+    reblogQueue?: ReblogQueue[];
+    postUrlToImages?: Record<string, Image[]>;
+}
+
+export async function sleep(milliseconds: number): Promise<void> {
+    const promise = new Promise<void>((resolve, reject) => {
         setTimeout(() => {
             resolve();
         }, milliseconds);
@@ -14,36 +32,25 @@ export async function sleep(milliseconds) {
 
 const POST_URL_PATTERN = /^(https:\/\/[^\/]+\/post\/(\d+))(?:\/.*)?$/;
 
-export function getLeftMostPostUrlInInnerHtml(element) {
+export function getLeftMostPostUrlInInnerHtml(element: Element): string | null {
     matchHrefAgaintPostUrl: {
-        if (typeof element.nodeName !== 'string') {
+        if (element.nodeName !== 'A') {
             break matchHrefAgaintPostUrl;
         }
-        const name = element.nodeName.toUpperCase();
-        if (name !== 'A') {
-            break matchHrefAgaintPostUrl;
-        }
+        const anchor = element as HTMLAnchorElement;
 
-        const href = element.href;
-        if (typeof href !== 'string') {
-            break matchHrefAgaintPostUrl;
-        }
-
+        const href = anchor.href;
         const matches = POST_URL_PATTERN.exec(href);
-        if (!Array.isArray(matches)) {
+        if (matches === null) {
             break matchHrefAgaintPostUrl;
         }
 
         return matches[1];
     }
 
-    const children = element.children;
-    if (typeof children !== 'object') {
-        return null;
-    }
-    for (const child of children) {
+    for (const child of element.children) {
         const result = getLeftMostPostUrlInInnerHtml(child);
-        if (typeof result === 'string') {
+        if (result !== null) {
             return result;
         }
     }
@@ -51,8 +58,72 @@ export function getLeftMostPostUrlInInnerHtml(element) {
     return null;
 }
 
-export function sendMessageToExtension(extensionId, message) {
-    const promise = new Promise((resolve, reject) => {
+export interface LoadPostUrlToImagesRequest {
+    type: 'loadPostUrlToImages';
+}
+
+export interface LoadPostUrlToImagesResponse {
+    errorMessage: string | null;
+    postUrlToImages: Record<string, Image[]>;
+}
+
+export interface QueueForRebloggingRequest {
+    type: 'queueForReblogging';
+    tabId: number;
+    postUrl: string;
+    images: Image[];
+}
+
+export interface QueueForRebloggingResponse {
+    errorMessage: string | null;
+}
+
+export interface DequeueForRebloggingRequest {
+    type: 'dequeueForReblogging';
+    tabId: number;
+}
+
+export interface DequeueForRebloggingResponse {
+    errorMessage: string | null;
+}
+
+export interface PreflightOnPostRequest {
+    type: 'preflightOnPost';
+    tabId: number;
+    postUrl: string;
+    postImageUrls: string[];
+    hrefs: string[];
+    innerText: string;
+    imageUrls: string[];
+}
+
+export interface PreflightOnPostResponse {
+    // TODO: Consider removing or using this field.
+    errorMessage: null;
+    imageUrls: string[];
+}
+
+export type RequestTypes =
+    | LoadPostUrlToImagesRequest
+    | QueueForRebloggingRequest
+    | DequeueForRebloggingRequest
+    | PreflightOnPostRequest;
+
+export type ResponseTypes =
+    | LoadPostUrlToImagesResponse
+    | QueueForRebloggingResponse
+    | DequeueForRebloggingResponse
+    | PreflightOnPostResponse;
+
+type ResponseFor<Request extends RequestTypes> =
+    Request extends LoadPostUrlToImagesRequest ? LoadPostUrlToImagesResponse :
+    Request extends QueueForRebloggingRequest ? QueueForRebloggingResponse :
+    Request extends DequeueForRebloggingRequest ? DequeueForRebloggingResponse :
+    Request extends PreflightOnPostRequest ? PreflightOnPostResponse :
+    never;
+
+export function sendMessageToExtension<Request extends RequestTypes>(extensionId: string, message: Request): Promise<ResponseFor<Request>> {
+    const promise = new Promise<ResponseFor<Request>>((resolve, reject) => {
         chrome.runtime.sendMessage(extensionId, message, result => {
             if (result === undefined) {
                 const lastError = JSON.stringify(chrome.runtime.lastError);
@@ -67,7 +138,11 @@ export function sendMessageToExtension(extensionId, message) {
     return promise;
 }
 
-const URL_PATTERN_TO_FETCH = [
+interface Fetcher {
+    (url: string, referrer: string): Promise<Response>
+}
+
+const URL_PATTERN_TO_FETCH: [RegExp, Fetcher][] = [
     [/^https:\/\/64\.media\.tumblr\.com\//, (url, referrer) => fetch(url, {
         method: 'GET',
         headers: {
@@ -93,7 +168,7 @@ const URL_PATTERN_TO_FETCH = [
     })]
 ];
 
-export function fetchImages(imageUrls, referrer) {
+export async function fetchImages(imageUrls: string[], referrer: string): Promise<PostImage[]> {
     const impl = async () => {
         const imageResponses = await (() => {
             const imageResponsePromises = [];
@@ -116,7 +191,7 @@ export function fetchImages(imageUrls, referrer) {
 
         const mimeList = [];
         const blobList = await (() => {
-            const blobPromises = [];
+            const blobPromises: Promise<Blob>[] = [];
             for (const response of imageResponses) {
                 if (response.ok !== true) {
                     throw new Error(`${response.url}: Failed to fetch (${response.status}).`);
@@ -130,11 +205,11 @@ export function fetchImages(imageUrls, referrer) {
         })();
 
         const base64StringList = await (() => {
-            function blobToBase64(blob) {
-                return new Promise((resolve, reject) => {
+            function blobToBase64(blob: Blob) {
+                return new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
                     reader.addEventListener('load', () => {
-                        const base64String = reader.result.replace(/^[^,]+,/, '');
+                        const base64String = (reader.result as string).replace(/^[^,]+,/, '');
                         resolve(base64String);
                     });
                     reader.addEventListener('error', () => {
@@ -152,7 +227,7 @@ export function fetchImages(imageUrls, referrer) {
             return Promise.all(base64StringPromises);
         })();
 
-        const images = [];
+        const images: PostImage[] = [];
         for (let i = 0; i < imageUrls.length; ++i) {
             images.push({
                 imageUrl: imageUrls[i],
@@ -163,22 +238,13 @@ export function fetchImages(imageUrls, referrer) {
         return images;
     }
 
-    let images = null;
-    let error = null;
+    let lastError: unknown = null;
     for (let i = 0; i < 5; ++i) {
         try {
-            images = impl();
-            error = null;
-            break;
+            return await impl();
         } catch (e) {
             console.warn(e);
-            error = e;
-            continue;
         }
     }
-    if (images === null) {
-        throw error;
-    }
-
-    return images;
+    throw lastError;
 }

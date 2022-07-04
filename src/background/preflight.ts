@@ -1,11 +1,11 @@
-import { fetchImages } from '../common';
-import { printInfo, printWarning, printError } from '../background/common';
+import { fetchImages, PostImage, LocalStorageData, PreflightOnPostResponse, Image } from '../common';
+import { printInfo, printWarning, printError } from './common';
 import * as pixiv from '../services/pixiv';
 import * as twitter from '../services/twitter';
 
 const SERVICE_MODULES = [pixiv, twitter];
 
-async function getImages(tabId, hrefs, innerText) {
+async function getImages(tabId: number, hrefs: string[], innerText: string): Promise<Image[]> {
     for (const serviceModule of SERVICE_MODULES) {
         const images = await serviceModule.getImages(tabId, hrefs, innerText);
         if (images.length >= 1) {
@@ -15,7 +15,7 @@ async function getImages(tabId, hrefs, innerText) {
     return [];
 }
 
-async function matchImages(tabId, postUrl, postImages, images) {
+async function matchImages(tabId: number, postUrl: string, postImages: PostImage[], images: Image[]): Promise<Image[] | null> {
     const requestBody = {
         sources: postImages,
         targets: images
@@ -69,13 +69,9 @@ async function matchImages(tabId, postUrl, postImages, images) {
     return matchedImages;
 }
 
-async function findInReblogQueue(imageUrl) {
-    if (typeof imageUrl !== 'string') {
-        throw Error(`${typeof imageUrl}: An invalid type.`);
-    }
-
-    const items = await chrome.storage.local.get('reblogQueue');
-    if ('reblogQueue' in items !== true) {
+async function findInReblogQueue(imageUrl: string): Promise<boolean> {
+    const items = await chrome.storage.local.get('reblogQueue') as LocalStorageData;
+    if (items.reblogQueue === undefined) {
         return false;
     }
     const reblogQueue = items.reblogQueue;
@@ -84,25 +80,21 @@ async function findInReblogQueue(imageUrl) {
     return imageUrls.includes(imageUrl);
 }
 
-async function findInLocalStorage(imageUrl) {
-    if (typeof imageUrl !== 'string') {
-        throw Error(`${typeof imageUrl}: An invalid type.`);
-    }
-
-    const items = await chrome.storage.local.get(imageUrl);
+async function findInLocalStorage(imageUrl: string): Promise<boolean> {
+    const items = await chrome.storage.local.get(imageUrl) as LocalStorageData;
     return imageUrl in items;
 }
 
-async function addEntryToPostUrlToImages(postUrl, images) {
-    const items = await chrome.storage.local.get('postUrlToImages');
-    if ('postUrlToImages' in items === false) {
-        items['postUrlToImages'] = {};
+async function addEntryToPostUrlToImages(postUrl: string, images: Image[]): Promise<void> {
+    const items = await chrome.storage.local.get('postUrlToImages') as LocalStorageData;
+    if (items.postUrlToImages === undefined) {
+        items.postUrlToImages = {};
     }
-    items['postUrlToImages'][postUrl] = images;
+    items.postUrlToImages[postUrl] = images;
     await chrome.storage.local.set(items);
 }
 
-async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
+async function preflightOnPostImpl(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): Promise<void>
 {
     if (postImageUrls.length === 0) {
         throw new Error('postImageUrls.length === 0');
@@ -120,7 +112,7 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
     }
 
     const matchedImages = await matchImages(tabId, postUrl, postImages, images);
-    if (Array.isArray(matchedImages) !== true) {
+    if (matchedImages === null) {
         sendResponse({
             errorMessage: null,
             imageUrls: []
@@ -182,6 +174,7 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
                 imageUrl: x.imageUrl
             };
         });
+        // TODO: Consider awaiting here.
         addEntryToPostUrlToImages(postUrl, images);
     }
 
@@ -191,12 +184,13 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
     });
 }
 
-export function preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
+export function preflightOnPost(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): void
 {
     try {
+        // TODO: This function call returns a promise, thus never throws.
         preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
     } catch (error) {
-        printError(tabId, `A fatal error in \`preflightOnPost\`: ${error.message}`);
+        printError(tabId, `A fatal error in \`preflightOnPost\`: ${error}`);
         throw error;
     }
 }

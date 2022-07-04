@@ -1,74 +1,57 @@
+import {
+    sleep, getLeftMostPostUrlInInnerHtml, sendMessageToExtension, PreflightOnPostRequest
+} from './common';
+
 if ('nonaltReblog' in window === false) {
     // The presence of `window.nonaltReblog` determines whether this script has
     // been already injected into this page or not.
-    window.nonaltReblog = {};
+    window.nonaltReblog = {
+        // When this script is injected to `https://www.tumblr.com/dashboard`, the tab
+        // ID for the page is assigned to the following property.
+        tabId: null,
+        // Likewise, the extension ID is assigned to the following property.
+        extensionId: null,
+        activeElement: null,
+        preflight: false
+    };
 }
 
-// When this script is injected to `https://www.tumblr.com/dashboard`, the tab
-// ID for the page is assigned to the following property.
-nonaltReblog.tabId = null;
+const nonaltReblog = window.nonaltReblog;
 
-// Likewise, the extension ID is assigned to the following property.
-nonaltReblog.extensionId = null;
-
-nonaltReblog.activeElement = null;
-nonaltReblog.preflight = false;
-
-import {
-    sleep, getLeftMostPostUrlInInnerHtml, sendMessageToExtension
-} from './common';
-
-function getHrefsInInnerHtml(element) {
-    const impl = (element, hrefs) => {
+function getHrefsInInnerHtml(element: Element): string[] {
+    const impl = (element: Element, hrefs: string[]): void => {
         matchHrefAgaintPostUrl: {
-            if (typeof element.nodeName !== 'string') {
+            if (element.nodeName !== 'A') {
                 break matchHrefAgaintPostUrl;
             }
-            const name = element.nodeName.toUpperCase();
-            if (name !== 'A') {
-                break matchHrefAgaintPostUrl;
-            }
+            const anchor = element as HTMLAnchorElement;
 
-            const href = element.href;
-            if (typeof href !== 'string') {
-                break matchHrefAgaintPostUrl;
-            }
-
+            const href = anchor.href;
             hrefs.push(href);
             break matchHrefAgaintPostUrl;
         }
 
-        const children = element.children;
-        if (typeof children !== 'object') {
-            return;
-        }
-        for (const child of children) {
+        for (const child of element.children) {
             impl(child, hrefs);
         }
     }
 
-    const hrefs = [];
+    const hrefs: string[] = [];
     impl(element, hrefs);
     return [...new Set(hrefs)];
 }
 
-function getPostImageUrls(element) {
+function getPostImageUrls(element: Element): string[] {
     const srcPattern = /^(https:\/\/64\.media\.tumblr\.com\/[0-9a-z]+\/(?:[0-9a-z]+-[0-9a-z]+\/s\d+x\d+\/[0-9a-z]+|tumblr_[0-9A-Za-z]+_\d+)\.(?:jpg|pnj|gifv))\s+(\d+)w$/;
 
-    const impl = (element, imageUrls) => {
+    const impl = (element: Element, imageUrls: string[]): void => {
         findImageUrl: {
-            if (typeof element.nodeName !== 'string') {
+            if (element.nodeName !== 'IMG') {
                 break findImageUrl;
             }
-            const name = element.nodeName.toUpperCase();
-            if (name !== 'IMG') {
-                break findImageUrl;
-            }
+            const img = element as HTMLImageElement;
 
-            const srcset = element.srcset;
-            if (typeof srcset !== 'string') {
-                break findImageUrl;
-            }
+            const srcset = img.srcset;
 
             const imageUrl = (() => {
                 const srcs = srcset.split(',');
@@ -91,23 +74,19 @@ function getPostImageUrls(element) {
             }
         }
 
-        const children = element.children;
-        if (typeof children !== 'object') {
-            return;
-        }
-        for (const child of children) {
+        for (const child of element.children) {
             impl(child, imageUrls);
         }
     };
 
-    const imageUrls = [];
+    const imageUrls: string[] = [];
     impl(element, imageUrls);
     return [...new Set(imageUrls)];
 }
 
-const POST_IMAGE_URLS = new Set();
-const IMAGE_URLS = new Set();
-const MESSAGES = [];
+const POST_IMAGE_URLS = new Set<string>();
+const IMAGE_URLS = new Set<string>();
+const MESSAGES: PreflightOnPostRequest[] = [];
 
 async function initiatePreflight() {
     if (nonaltReblog.activeElement === null) {
@@ -123,18 +102,9 @@ async function initiatePreflight() {
             const message = MESSAGES[0];
             MESSAGES.shift();
             message.imageUrls = [...IMAGE_URLS];
-            const result = await sendMessageToExtension(nonaltReblog.extensionId, message);
-            if ('errorMessage' in result !== true) {
-                throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-            }
+            const result = await sendMessageToExtension(nonaltReblog.extensionId!, message);
             if (result.errorMessage !== null) {
                 throw Error(result.errorMessage);
-            }
-            if ('imageUrls' in result !== true) {
-                throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-            }
-            if (Array.isArray(result.imageUrls) !== true) {
-                throw Error(`${typeof result.imageUrls}: An invalid type.`);
             }
             for (const imageUrl of result.imageUrls) {
                 IMAGE_URLS.add(imageUrl);
@@ -154,10 +124,6 @@ async function initiatePreflight() {
         while (postElement.nextElementSibling !== null) {
             const previousPostElement = postElement;
             postElement = postElement.nextElementSibling;
-            if (typeof postElement !== 'object') {
-                console.assert(typeof postElement === 'object', typeof postElement);
-                throw new Error(`${typeof postElement}: An unexpected type.`);
-            }
             postElement.scrollIntoView();
 
             const postUrl = getLeftMostPostUrlInInnerHtml(previousPostElement);
@@ -168,7 +134,8 @@ async function initiatePreflight() {
             }
 
             const hrefs = getHrefsInInnerHtml(previousPostElement);
-            const innerText = previousPostElement.innerText;
+            // TODO: Is the following cast safe?
+            const innerText = (previousPostElement as HTMLElement).innerText;
 
             {
                 const myAccountPattern = /^https:\/\/cryolite\.tumblr\.com/;
@@ -210,11 +177,13 @@ async function initiatePreflight() {
 
             MESSAGES.push({
                 type: 'preflightOnPost',
-                tabId: nonaltReblog.tabId,
+                tabId: nonaltReblog.tabId!,
                 postUrl: postUrl,
                 postImageUrls: postImageUrls,
                 hrefs: hrefs,
-                innerText: innerText
+                innerText: innerText,
+                // TODO: Check if it's right to set this field.
+                imageUrls: []
             });
             previousPostElement.remove();
 
@@ -229,7 +198,7 @@ async function initiatePreflight() {
                 const message = MESSAGES[0];
                 MESSAGES.shift();
                 message.imageUrls = [...IMAGE_URLS];
-                preflightPromise = sendMessageToExtension(nonaltReblog.extensionId, message);
+                preflightPromise = sendMessageToExtension(nonaltReblog.extensionId!, message);
             }
 
             if (Date.now() > sleepDeadline) {
@@ -245,17 +214,8 @@ async function initiatePreflight() {
 
             const result = await Promise.race(eventMultiplexer);
             if (typeof result === 'object') {
-                if ('errorMessage' in result !== true) {
-                    throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-                }
                 if (result.errorMessage !== null) {
                     throw Error(result.errorMessage);
-                }
-                if ('imageUrls' in result !== true) {
-                    throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-                }
-                if (Array.isArray(result.imageUrls) !== true) {
-                    throw Error(`${typeof result.imageUrls}: An invalid type.`);
                 }
                 for (const imageUrl of result.imageUrls) {
                     IMAGE_URLS.add(imageUrl);
@@ -267,17 +227,8 @@ async function initiatePreflight() {
     }
     if (preflightPromise !== null) {
         const result = await preflightPromise;
-        if ('errorMessage' in result !== true) {
-            throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-        }
         if (result.errorMessage !== null) {
             throw Error(result.errorMessage);
-        }
-        if ('imageUrls' in result !== true) {
-            throw Error(`An unexpected message response: ${JSON.stringify(result)}`);
-        }
-        if (Array.isArray(result.imageUrls) !== true) {
-            throw Error(`${typeof result.imageUrls}: An invalid type.`);
         }
         for (const imageUrl of result.imageUrls) {
             IMAGE_URLS.add(imageUrl);
@@ -352,7 +303,8 @@ document.addEventListener('keydown', event => {
 
     if (nonaltReblog.activeElement.previousElementSibling !== null) {
         nonaltReblog.activeElement = nonaltReblog.activeElement.previousElementSibling;
-        nonaltReblog.activeElement.focus();
+        // TODO: Is the following cast safe?
+        (nonaltReblog.activeElement as HTMLElement).focus();
     }
 });
 
@@ -412,8 +364,8 @@ document.addEventListener('keydown', async event => {
         return;
     }
 
-    sendMessageToExtension(nonaltReblog.extensionId, {
+    sendMessageToExtension(nonaltReblog.extensionId!, {
         type: 'dequeueForReblogging',
-        tabId: nonaltReblog.tabId
+        tabId: nonaltReblog.tabId!
     });
 });
