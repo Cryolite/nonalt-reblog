@@ -243,6 +243,7 @@ export async function fetchImages(imageUrls: string[], referrer: string): Promis
             return await impl();
         } catch (e) {
             console.warn(e);
+            lastError = e;
         }
     }
     throw lastError;
