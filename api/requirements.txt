@@ -1,0 +1,7 @@
+Flask
+Flask-Cors
+jsonschema
+numpy
+opencv-python
+Pillow
+requests
