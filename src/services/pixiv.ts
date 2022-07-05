@@ -95,23 +95,8 @@ async function getPixivImagesImpl(tabId: number, sourceUrl: string, images: Imag
         openerTabId: tabId,
         url: sourceUrl,
         active: false
-    });
+    }, 60 * 1000);
     const newTabId = newTab.id!;
-
-    // Resource loading for the page sometimes takes a long time. In such cases,
-    // `chrome.tabs.remove` gets stuck. To avoid this, the following script
-    // injection sets a time limit on resource loading for the page.
-    await executeScript({
-        target: {
-            tabId: newTabId
-        },
-        func: () => {
-            setTimeout(() => {
-                window.stop();
-            }, 60 * 1000);
-        },
-        world: 'MAIN'
-    });
 
     const artistUrl = await getPixivArtistUrl(newTabId);
     if (typeof artistUrl !== 'string') {
@@ -184,7 +169,11 @@ export async function getImages(tabId: number, hrefs: string[], innerText: strin
 
     const images: Image[] = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getPixivImagesImpl(tabId, sourceUrl, images);
+        try {
+            await getPixivImagesImpl(tabId, sourceUrl, images);
+        } catch (error: unknown) {
+            console.error(error as Error);
+        }
     }
     return images;
 }

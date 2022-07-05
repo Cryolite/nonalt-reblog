@@ -29,7 +29,7 @@ import { createTab, executeScript } from "./background/common";
         const newTab = await createTab({
             url: embedUrl,
             active: false
-        });
+        }, 60 * 1000);
         const newTabId = newTab.id!;
         const embedCode = await executeScript({
             target: {

@@ -146,8 +146,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
                 openerTabId: tabId,
                 url: postUrl,
                 active: false
-            });
-            const newTabId = newTab.id!;
+            }, 60 * 1000);
             const result = await executeScript({
                 target: {
                     tabId: newTabId
@@ -288,22 +287,8 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
             openerTabId: tabId,
             url: `https://www.tumblr.com/reblog/${account}/${postId}/${reblogKey}`,
             active: true
-        });
+        }, 10 * 1000);
         const newTabId = newTab.id!;
-        // Resource loading for the page often takes a long time. In such cases,
-        // `chrome.tabs.remove` gets stuck. To avoid this, the following script
-        // injection sets a time limit on resource loading for the page.
-        await executeScript({
-            target: {
-                tabId: newTabId
-            },
-            func: () => {
-                setTimeout(() => {
-                    window.stop();
-                }, 10 * 1000);
-            },
-            world: 'MAIN'
-        });
         // Let the script wait for the `Reblog` button to appear.
         await sleep(6 * 1000);
 
