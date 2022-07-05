@@ -1,10 +1,4 @@
-// TODO: Remove this interface once the following PR is merged.
-// https://github.com/DefinitelyTyped/DefinitelyTyped/pull/61068
-type ScriptInjectionWithTypedResult<Args extends unknown[], Result> = chrome.scripting.ScriptInjection<Args> & {
-    func: (...args: Args) => Result
-}
-
-export async function executeScript<Args extends unknown[], Result>(scriptInjection: ScriptInjectionWithTypedResult<Args, Result>): Promise<Awaited<Result>> {
+export async function executeScript<Args extends unknown[], Result>(scriptInjection: chrome.scripting.ScriptInjection<Args, Result>) {
     const injectionResults = await chrome.scripting.executeScript(scriptInjection);
     console.assert(injectionResults.length === 1, injectionResults.length);
     if (injectionResults.length === 0) {
