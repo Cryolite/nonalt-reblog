@@ -81,6 +81,12 @@ def _blobToImage(mime: str, blob: str) -> Optional[numpy.ndarray]:
     elif image.getbands() == ('R', 'G', 'B', 'A'):
         image = numpy.array(image)
         image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+    elif image.getbands() == ('C', 'M', 'Y', 'K'):
+        # TODO: Make sure we are really okay with the following conversion.
+        #       cf. https://stackoverflow.com/questions/38855022
+        image = image.convert('RGB')
+        image = numpy.array(image)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     elif image.getbands() == ('L',):
         image = numpy.array(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
