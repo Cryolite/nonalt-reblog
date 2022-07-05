@@ -1,11 +1,11 @@
-import { fetchImages } from '../common';
-import { printInfo, printWarning, printError } from '../background/common';
+import { fetchImages, PostImage, LocalStorageData, PreflightOnPostResponse, Image } from '../common';
+import { printInfo, printWarning, printError } from './common';
 import * as pixiv from '../services/pixiv';
 import * as twitter from '../services/twitter';
 
 const SERVICE_MODULES = [pixiv, twitter];
 
-async function getImages(tabId, hrefs, innerText) {
+async function getImages(tabId: number, hrefs: string[], innerText: string): Promise<Image[]> {
     for (const serviceModule of SERVICE_MODULES) {
         const images = await serviceModule.getImages(tabId, hrefs, innerText);
         if (images.length >= 1) {
@@ -15,7 +15,7 @@ async function getImages(tabId, hrefs, innerText) {
     return [];
 }
 
-async function matchImages(tabId, postUrl, postImages, images) {
+async function matchImages(tabId: number, postUrl: string, postImages: PostImage[], images: Image[]): Promise<Image[] | null> {
     const requestBody = {
         sources: postImages,
         targets: images
@@ -69,13 +69,9 @@ async function matchImages(tabId, postUrl, postImages, images) {
     return matchedImages;
 }
 
-async function findInReblogQueue(imageUrl) {
-    if (typeof imageUrl !== 'string') {
-        throw Error(`${typeof imageUrl}: An invalid type.`);
-    }
-
-    const items = await chrome.storage.local.get('reblogQueue');
-    if ('reblogQueue' in items !== true) {
+async function findInReblogQueue(imageUrl: string): Promise<boolean> {
+    const items = await chrome.storage.local.get('reblogQueue') as LocalStorageData;
+    if (items.reblogQueue === undefined) {
         return false;
     }
     const reblogQueue = items.reblogQueue;
@@ -84,25 +80,21 @@ async function findInReblogQueue(imageUrl) {
     return imageUrls.includes(imageUrl);
 }
 
-async function findInLocalStorage(imageUrl) {
-    if (typeof imageUrl !== 'string') {
-        throw Error(`${typeof imageUrl}: An invalid type.`);
-    }
-
-    const items = await chrome.storage.local.get(imageUrl);
+async function findInLocalStorage(imageUrl: string): Promise<boolean> {
+    const items = await chrome.storage.local.get(imageUrl) as LocalStorageData;
     return imageUrl in items;
 }
 
-async function addEntryToPostUrlToImages(postUrl, images) {
-    const items = await chrome.storage.local.get('postUrlToImages');
-    if ('postUrlToImages' in items === false) {
-        items['postUrlToImages'] = {};
+async function addEntryToPostUrlToImages(postUrl: string, images: Image[]): Promise<void> {
+    const items = await chrome.storage.local.get('postUrlToImages') as LocalStorageData;
+    if (items.postUrlToImages === undefined) {
+        items.postUrlToImages = {};
     }
-    items['postUrlToImages'][postUrl] = images;
+    items.postUrlToImages[postUrl] = images;
     await chrome.storage.local.set(items);
 }
 
-async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
+async function preflightOnPostImpl(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): Promise<void>
 {
     if (postImageUrls.length === 0) {
         throw new Error('postImageUrls.length === 0');
@@ -120,7 +112,7 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
     }
 
     const matchedImages = await matchImages(tabId, postUrl, postImages, images);
-    if (Array.isArray(matchedImages) !== true) {
+    if (matchedImages === null) {
         sendResponse({
             errorMessage: null,
             imageUrls: []
@@ -182,7 +174,7 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
                 imageUrl: x.imageUrl
             };
         });
-        addEntryToPostUrlToImages(postUrl, images);
+        await addEntryToPostUrlToImages(postUrl, images);
     }
 
     sendResponse({
@@ -191,12 +183,26 @@ async function preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerTe
     });
 }
 
-export function preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse)
+export async function preflightOnPost(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): Promise<void>
 {
     try {
-        preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
-    } catch (error) {
-        printError(tabId, `A fatal error in \`preflightOnPost\`: ${error.message}`);
-        throw error;
+        // If an error occurs during the execution of the `preflightOnPostImpl`
+        // function and an exception is thrown, it would be complicated to write
+        // a try-catch block at each point and send the error message with the
+        // `sendResponse` function. Instead, let the exception go through to
+        // this try-catch block and consolidate the sending of the error message
+        // by the `sendResponse` function.
+        //
+        // Note that the following `await` is only for throwing an exception if
+        // the promise returned by the `preflightOnPostImpl` function is
+        // rejected. Since this function is expected to be called sequentially,
+        // the following `await` does not interfere with concurrency.
+        await preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
+    } catch (error: unknown) {
+        printError(tabId, `A fatal error in \`preflightOnPost\`: ${error}`);
+        sendResponse({
+            errorMessage: (error as Error).message,
+            imageUrls: []
+        });
     }
 }

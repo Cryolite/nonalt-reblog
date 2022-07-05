@@ -1,4 +1,4 @@
-import { sleep } from './common';
+import { Image, LocalStorageData, QueueForRebloggingResponse, RequestTypes, ResponseTypes, sleep } from './common';
 import { executeScript, printError, createTab } from './background/common';
 import { preflightOnPost } from './background/preflight';
 
@@ -6,12 +6,12 @@ const URLS = [
     'https://www.tumblr.com/dashboard'
 ];
 
-async function queueForReblogging(tabId, postUrl, images, sendResponse) {
-    const items = await chrome.storage.local.get('reblogQueue');
-    if ('reblogQueue' in items === false) {
-        items['reblogQueue'] = [];
+async function queueForReblogging(tabId: number, postUrl: string, images: Image[], sendResponse: (message: QueueForRebloggingResponse) => void): Promise<void> {
+    const items = await chrome.storage.local.get('reblogQueue') as LocalStorageData;
+    if (items.reblogQueue === undefined) {
+        items.reblogQueue = [];
     }
-    items['reblogQueue'].push({
+    items.reblogQueue.push({
         postUrl: postUrl,
         images: images
     });
@@ -30,8 +30,19 @@ async function queueForReblogging(tabId, postUrl, images, sendResponse) {
     });
 }
 
-async function createArtistTagger() {
-    const artistTagger = {};
+interface ArtistInfoEntry {
+    urls: string[];
+    artistNames?: string[];
+    circleNames?: string[];
+}
+
+interface ArtistInfo {
+    artistNames: string[];
+    circleNames: string[];
+}
+
+async function createArtistTagger(): Promise<Record<string, ArtistInfo>> {
+    const artistTagger: Record<string, ArtistInfo> = {};
     {
         const url = chrome.runtime.getURL('data/artists.json');
         const response = await fetch(url);
@@ -39,10 +50,10 @@ async function createArtistTagger() {
             throw new Error('Failed to read `artists.json`.')
         }
 
-        const artistsInfo = await response.json();
+        const artistsInfo = await response.json() as ArtistInfoEntry[];
         for (const info of artistsInfo) {
-            const artistNames = 'artistNames' in info ? info.artistNames : [];
-            const circleNames = 'circleNames' in info ? info.circleNames : [];
+            const artistNames = info.artistNames ?? [];
+            const circleNames = info.circleNames ?? [];
             for (const url of info.urls) {
                 artistTagger[url] = {
                     artistNames: artistNames,
@@ -54,85 +65,21 @@ async function createArtistTagger() {
     return artistTagger;
 }
 
-async function dequeueForReblogging(tabId) {
+async function dequeueForReblogging(tabId: number): Promise<void> {
     const artistTagger = await createArtistTagger();
 
     const reblogQueue = await (async () => {
-        const items = await chrome.storage.local.get('reblogQueue');
-        if ('reblogQueue' in items === false) {
-            return;
-        }
-        return items.reblogQueue;
+        const items = await chrome.storage.local.get('reblogQueue') as LocalStorageData;
+        return items.reblogQueue ?? [];
     })();
 
     while (reblogQueue.length > 0) {
         const postUrl = reblogQueue[0].postUrl;
-        if (typeof postUrl !== 'string') {
-            console.assert(typeof postUrl === 'string', typeof postUrl);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: (postUrl) => { console.assert(typeof postUrl === 'string', typeof postUrl); },
-                args: [postUrl]
-            })
-            return;
-        }
-
         const artistUrls = (() => {
             const artistUrls = reblogQueue[0].images.map(x => x.artistUrl);
             return [...new Set(artistUrls)];
         })();
-        if (Array.isArray(artistUrls) === false) {
-            console.assert(Array.isArray(artistUrls), typeof artistUrls);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: artistUrls => { console.assert(Array.isArray(artistUrls), typeof artistUrls); },
-                args: [artistUrls]
-            });
-            return;
-        }
-        for (const artistUrl of artistUrls) {
-            if (typeof artistUrl !== 'string') {
-                console.assert(typeof artistUrl === 'string', typeof artistUrl);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: artistUrl => { console.assert(typeof artistUrl === 'string', typeof artistUrl); },
-                    args: [artistUrl]
-                });
-                return;
-            }
-        }
-
         const imageUrls = reblogQueue[0].images.map(x => x.imageUrl);
-        if (Array.isArray(imageUrls) === false) {
-            console.assert(Array.isArray(imageUrls), typeof imageUrls);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: imageUrls => { console.assert(Array.isArray(imageUrls), typeof imageUrls); },
-                args: [imageUrls]
-            });
-            return;
-        }
-        for (const imageUrl of imageUrls) {
-            if (typeof imageUrl !== 'string') {
-                console.assert(typeof imageUrl === 'string', typeof imageUrl);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: imageUrl => { console.assert(typeof imageUrl === 'string', typeof imageUrl); },
-                    args: [imageUrl]
-                });
-                return;
-            }
-        }
 
         {
             // Check if all the image URLs have already been recorded in the
@@ -140,7 +87,7 @@ async function dequeueForReblogging(tabId) {
             // does not need to be reblogged.
             let allReblogged = true;
             for (const imageUrl of imageUrls) {
-                const items = await chrome.storage.local.get(imageUrl);
+                const items = await chrome.storage.local.get(imageUrl) as LocalStorageData;
                 if (imageUrl in items === false) {
                     allReblogged = false;
                     break;
@@ -158,7 +105,7 @@ async function dequeueForReblogging(tabId) {
                 reblogQueue.shift();
                 await chrome.storage.local.set({
                     reblogQueue: reblogQueue
-                });
+                } as LocalStorageData);
 
                 continue;
             }
@@ -173,9 +120,6 @@ async function dequeueForReblogging(tabId) {
                 continue;
             }
             const artistInfo = artistTagger[artistUrl];
-            if ('artistNames' in artistInfo !== true) {
-                continue;
-            }
             for (const artistName of artistInfo.artistNames) {
                 tags.push(`${artistName} (イラストレータ)`);
             }
@@ -187,18 +131,15 @@ async function dequeueForReblogging(tabId) {
                 continue;
             }
             const artistInfo = artistTagger[artistUrl];
-            if ('circleNames' in artistInfo !== true) {
-                continue;
-            }
             for (const circleName of artistInfo.circleNames) {
                 tags.push(`${circleName} (サークル)`);
             }
         }
 
-        const postId = /(\d+)$/.exec(postUrl)[1];
+        const postId = /(\d+)$/.exec(postUrl)![1];
 
         // Extract the account name and reblog key.
-        async function getAccountAndReblogKey () {
+        async function getAccountAndReblogKey(): Promise<[string, string]> {
             // First, try to extract the account name and reblog key from the
             // `links` of the post page.
             const newTab = await createTab({
@@ -206,66 +147,56 @@ async function dequeueForReblogging(tabId) {
                 url: postUrl,
                 active: false
             });
+            const newTabId = newTab.id!;
             const result = await executeScript({
                 target: {
-                    tabId: newTab.id
+                    tabId: newTabId
                 },
-                func: postId => {
+                func: (postId): [string, string] | string | null => {
                     const reblogHrefPattern = RegExp(`^https://www\\.tumblr\\.com/reblog/([^/]+)/${postId}/(\\w+)`);
 
                     for (const link of document.links) {
                         const href = link.href;
                         const matches = reblogHrefPattern.exec(href);
-                        if (Array.isArray(matches) === true) {
+                        if (matches !== null) {
                             return [matches[1], matches[2]];
                         }
                     }
 
-                    function impl(element) {
+                    function impl(element: Element): string | null {
                         returnIframeSrc: {
-                            if (typeof element.nodeName !== 'string') {
-                                break returnIframeSrc;
-                            }
-                            const name = element.nodeName.toUpperCase();
-                            if (name !== 'IFRAME') {
+                            if (element.nodeName !== 'IFRAME') {
                                 break returnIframeSrc;
                             }
 
-                            const src = element.src;
-                            if (typeof src !== 'string') {
-                                break returnIframeSrc;
-                            }
-
-                            return src;
+                            const iframe = element as HTMLIFrameElement;
+                            return iframe.src;
                         }
 
                         const children = element.children;
-                        if (typeof children !== 'object') {
-                            return null;
-                        }
                         for (const child of children) {
                             const iframeSrc = impl(child);
-                            if (typeof iframeSrc === 'string') {
+                            if (iframeSrc !== null) {
                                 return iframeSrc;
                             }
                         }
                         return null;
                     }
 
-                    return impl(document);
+                    return impl(document.body);
                 },
                 args: [postId],
                 world: 'MAIN'
             });
-            chrome.tabs.remove(newTab.id);
+            chrome.tabs.remove(newTabId);
 
-            if (Array.isArray(result) === true) {
+            if (result instanceof Array) {
                 // The account name and reblog key have been extracted from the
                 // `links` of the post page.
                 return result;
             }
 
-            if (typeof result !== 'string') {
+            if (result === null) {
                 const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
                 console.warn(errorMessage);
                 executeScript({
@@ -286,17 +217,18 @@ async function dequeueForReblogging(tabId) {
                 url: result,
                 active: false
             });
+            const iframeTabId = iframeTab.id!;
             const iframeResult = await executeScript({
                 target: {
-                    tabId: iframeTab.id
+                    tabId: iframeTabId
                 },
-                func: postId => {
+                func: (postId): [string, string] | null => {
                     const reblogHrefPattern = RegExp(`^https://www\\.tumblr\\.com/reblog/([^/]+)/${postId}/(\\w+)`);
 
                     for (const link of document.links) {
                         const href = link.href;
                         const matches = reblogHrefPattern.exec(href);
-                        if (Array.isArray(matches) === true) {
+                        if (matches !== null) {
                             return [matches[1], matches[2]];
                         }
                     }
@@ -306,9 +238,9 @@ async function dequeueForReblogging(tabId) {
                 args: [postId],
                 world: 'MAIN'
             });
-            chrome.tabs.remove(iframeTab.id);
+            chrome.tabs.remove(iframeTabId);
 
-            if (Array.isArray(iframeResult) === true) {
+            if (iframeResult !== null) {
                 // The account name and reblog key have been extracted from the
                 // `iframe` of the post page.
                 return iframeResult;
@@ -357,12 +289,13 @@ async function dequeueForReblogging(tabId) {
             url: `https://www.tumblr.com/reblog/${account}/${postId}/${reblogKey}`,
             active: true
         });
+        const newTabId = newTab.id!;
         // Resource loading for the page often takes a long time. In such cases,
         // `chrome.tabs.remove` gets stuck. To avoid this, the following script
         // injection sets a time limit on resource loading for the page.
         await executeScript({
             target: {
-                tabId: newTab.id
+                tabId: newTabId
             },
             func: () => {
                 setTimeout(() => {
@@ -377,41 +310,35 @@ async function dequeueForReblogging(tabId) {
         // Search the `Reblog` button and click it.
         await chrome.scripting.executeScript({
             target: {
-                tabId: newTab.id,
+                tabId: newTabId,
                 allFrames: true
             },
             func: (postId, tags, reblogKey) => {
-                function annotateTags(element) {
+                function annotateTags(element: Element): boolean {
                     findAndInputTagEditor: {
-                        if (typeof element.nodeName !== 'string') {
+                        if (element.nodeName !== 'DIV') {
                             break findAndInputTagEditor;
                         }
-                        const nodeName = element.nodeName.toUpperCase();
-                        if (nodeName !== 'DIV') {
-                            break findAndInputTagEditor;
-                        }
-                        const className = element.className;
+                        const div = element as HTMLDivElement;
+                        const className = div.className;
                         if (className !== 'post-form--tag-editor') {
                             break findAndInputTagEditor;
                         }
-                        const textContent = element.textContent;
+                        const textContent = div.textContent;
                         // `textContent` has a zero-width space at its
                         // beginning, so simple equality check fails.
-                        if (textContent.indexOf('#tags') === -1) {
+                        if ((textContent ?? '').indexOf('#tags') === -1) {
                             break findAndInputTagEditor;
                         }
-                        const dataset = element.dataset;
-                        if ('subview' in dataset !== true) {
-                            break findAndInputTagEditor;
-                        }
+                        const dataset = div.dataset;
                         if (dataset.subview !== 'tagEditor') {
                             break findAndInputTagEditor;
                         }
 
-                        element.click();
-                        element = document.activeElement;
+                        div.click();
+                        const activeElement = document.activeElement!;
                         for (const tag of tags) {
-                            element.insertAdjacentText('afterbegin', tag);
+                            activeElement.insertAdjacentText('afterbegin', tag);
 
                             const keyboardEvent = new KeyboardEvent('keydown', {
                                 bubbles: true,
@@ -419,15 +346,12 @@ async function dequeueForReblogging(tabId) {
                                 code: 'Enter',
                                 keyCode: 13
                             });
-                            element.dispatchEvent(keyboardEvent);
+                            activeElement.dispatchEvent(keyboardEvent);
                         }
 
                         return true;
                     }
 
-                    if (typeof element.children !== 'object') {
-                        return false;
-                    }
                     for (const child of element.children) {
                         const result = annotateTags(child);
                         if (result === true) {
@@ -437,35 +361,29 @@ async function dequeueForReblogging(tabId) {
                     return false;
                 }
 
-                annotateTags(document);
+                annotateTags(document.body);
 
-                function impl(element) {
+                function impl(element: Element) {
                     checkAndClick: {
-                        if (typeof element.nodeName !== 'string') {
+                        if (element.nodeName !== 'BUTTON') {
                             break checkAndClick;
                         }
-                        const name = element.nodeName.toUpperCase();
-                        if (name !== 'BUTTON') {
-                            break checkAndClick;
-                        }
+                        const button = element as HTMLButtonElement;
 
-                        const innerText = element.innerText;
+                        const innerText = button.innerText;
                         if (innerText !== 'Reblog') {
                             break checkAndClick;
                         }
 
-                        const formAction = element.formAction;
+                        const formAction = button.formAction;
                         if (formAction !== `https://www.tumblr.com/neue_web/iframe/reblog/${postId}/${reblogKey}`) {
                             break checkAndClick;
                         }
 
-                        element.click();
+                        button.click();
                         return true;
                     }
 
-                    if (typeof element.children !== 'object') {
-                        return false;
-                    }
                     for (const child of element.children) {
                         const result = impl(child);
                         if (result === true) {
@@ -475,7 +393,7 @@ async function dequeueForReblogging(tabId) {
                     return false;
                 }
 
-                impl(document);
+                impl(document.body);
             },
             args: [postId, tags, reblogKey],
             world: 'MAIN'
@@ -551,7 +469,7 @@ async function dequeueForReblogging(tabId) {
                 break;
             }
         }
-        chrome.tabs.remove(newTab.id);
+        chrome.tabs.remove(newTabId);
         if (confirmed === true) {
             continue;
         }
@@ -568,7 +486,7 @@ async function dequeueForReblogging(tabId) {
     }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: RequestTypes, sender, sendResponse: (message: ResponseTypes) => void) => {
     const type = message.type;
     if (typeof type !== 'string') {
         console.assert(typeof type === 'string', typeof type);
@@ -603,209 +521,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 
-chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-    const type = message.type;
-    if (typeof type !== 'string') {
-        console.assert(typeof type === 'string', typeof type);
-        sendResponse({
-            errorMessage: `${typeof type}: An invalid type.`
-        });
-        return false;
-    }
-
-    if (type === 'preflightOnPost') {
-        const tabId = message.tabId;
-        if (typeof tabId !== 'number') {
-            console.assert(typeof tabId !== 'number', typeof tabId);
-            sendResponse({
-                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`,
-                imageUrls: []
-            });
-            return false;
-        }
-
-        const postUrl = message.postUrl;
-        if (typeof postUrl !== 'string') {
-            const errorMessage = `${typeof postUrl}: An invalid type.`;
-            printError(tabId, errorMessage);
-            sendResponse({
-                errorMessage: errorMessage,
-                imageUrls: []
-            });
-            return false;
-        }
-
-        const postImageUrls = message.postImageUrls;
-        if (Array.isArray(postImageUrls) !== true) {
-            const errorMessage = `${typeof postImageUrls}: An invalid type.`;
-            printError(tabId, errorMessage);
-            sendResponse({
-                errorMessage: errorMessage,
-                imageUrls: []
-            });
-            return false;
-        }
-        for (const postImageUrl of postImageUrls) {
-            if (typeof postImageUrl !== 'string') {
-                const errorMessage = `${typeof postImageUrl}: An invalid type.`;
-                printError(tabId, errorMessage);
-                sendResponse({
-                    errorMessage: errorMessage,
-                    imageUrls: []
-                });
-                return false;
-            }
-        }
-
-        const hrefs = message.hrefs;
-        if (Array.isArray(hrefs) !== true) {
-            const errorMessage = `${typeof hrefs}: An invalid type.`;
-            printError(tabId, errorMessage);
-            sendResponse({
-                errorMessage: errorMessage,
-                imageUrls: []
-            });
-            return false;
-        }
-        for (const href in hrefs) {
-            if (typeof href !== 'string') {
-                const errorMessage = `${typeof href}: An invalid type.`;
-                printError(tabId, errorMessage);
-                sendResponse({
-                    errorMessage: errorMessage,
-                    imageUrls: []
-                });
-                return false;
-            }
-        }
-
-        const innerText = message.innerText;
-        if (typeof innerText !== 'string') {
-            const errorMessage = `${typeof innerText}: An invalid type.`;
-            printError(tabId, errorMessage);
-            sendResponse({
-                errorMessage: errorMessage,
-                imageUrls: []
-            });
-            return false;
-        }
-
-        const imageUrls = message.imageUrls;
-        if (Array.isArray(imageUrls) !== true) {
-            const errorMessage = `${typeof imageUrls}: An invalid type.`;
-            printError(tabId, errorMessage);
-            sendResponse({
-                errorMessage: errorMessage,
-                imageUrls: []
-            });
-            return false;
-        }
-        for (const imageUrl of imageUrls) {
-            if (typeof imageUrl !== 'string') {
-                const errorMessage = `${typeof imageUrl}: An invalid type.`;
-                printError(tabId, errorMessage);
-                sendResponse({
-                    errorMessage: errorMessage,
-                    imageUrls: []
-                });
-                return false;
-            }
-        }
-
-        preflightOnPost(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
+chrome.runtime.onMessageExternal.addListener((message: RequestTypes, sender, sendResponse: (message: ResponseTypes) => void) => {
+    if (message.type === 'preflightOnPost') {
+        preflightOnPost(message.tabId, message.postUrl, message.postImageUrls, message.hrefs, message.innerText, message.imageUrls, sendResponse);
         return true;
     }
 
-    if (type === 'queueForReblogging') {
-        const tabId = message.tabId;
-        if (typeof tabId !== 'number') {
-            console.assert(typeof tabId !== 'number', typeof tabId);
-            sendResponse({
-                errorMessage: `${typeof tabId}: An invalid type for \`message.tabId\`.`
-            });
-            return false;
-        }
-
-        const postUrl = message.postUrl;
-        if (typeof postUrl !== 'string') {
-            console.assert(typeof postUrl === 'string', typeof postUrl);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: postUrl => { console.assert(typeof postUrl === 'string', typeof postUrl); },
-                args: [postUrl]
-            });
-            sendResponse({
-                errorMessage: `${typeof postUrl}: An invalid type.`
-            });
-            return false;
-        }
-
-        const images = message.images;
-        if (Array.isArray(images) !== true) {
-            console.assert(Array.isArray(images), typeof images);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: images => { console.assert(Array.isArray(images), typeof images); },
-                args: [images]
-            });
-            sendResponse({
-                errorMessage: `${typeof images}: An invalid type.`
-            });
-            return false;
-        }
-        for (const image of images) {
-            const artistUrl = image.artistUrl;
-            if (typeof artistUrl !== 'string') {
-                console.assert(typeof artistUrl === 'string', typeof artistUrl);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: artistUrl => { console.assert(typeof artistUrl === 'string', typeof artistUrl); },
-                    args: [artistUrl]
-                });
-                sendResponse({
-                    errorMessage: `${typeof artistUrl}: An invalid type.`
-                });
-                return false;
-            }
-
-            const imageUrl = image.imageUrl;
-            if (typeof imageUrl !== 'string') {
-                console.assert(typeof imageUrl === 'string', typeof imageUrl);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: imageUrl => { console.assert(typeof imageUrl === 'string', typeof imageUrl); },
-                    args: [imageUrl]
-                });
-                sendResponse({
-                    errorMessage: `${typeof imageUrl}: An invalid type.`
-                });
-                return false;
-            }
-        }
-
-        queueForReblogging(tabId, postUrl, images, sendResponse);
+    if (message.type === 'queueForReblogging') {
+        queueForReblogging(message.tabId, message.postUrl, message.images, sendResponse);
         return true;
     }
 
-    if (type === 'dequeueForReblogging') {
-        const tabId = message.tabId;
-        if (typeof tabId !== 'number') {
-            console.assert(typeof tabId !== 'number', typeof tabId);
-            sendResponse({
-                errorMessage: `${typeof tabId}: An invalid type.`
-            });
-            return false;
-        }
-
-        dequeueForReblogging(tabId);
+    if (message.type === 'dequeueForReblogging') {
+        dequeueForReblogging(message.tabId);
         sendResponse({
             errorMessage: null
         });
@@ -819,13 +547,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     return false;
 });
 
-async function inject(tabId) {
-    if (typeof tabId !== 'number') {
-        console.assert(typeof tabId === 'number', typeof tabId);
-        const error = new Error(`${typeof tabId}: An invalid type.`)
-        throw error;
-    }
-
+async function inject(tabId: number) {
     const injected = await executeScript({
         target: {
             tabId: tabId
@@ -841,11 +563,11 @@ async function inject(tabId) {
             target: {
                 tabId: tabId
             },
-            func: (scriptUrl, tabId, extensionId) => {
+            func: (scriptUrl: string, tabId: number, extensionId: string) => {
                 const scriptElement = document.createElement('script');
                 scriptElement.addEventListener('load', () => {
-                    nonaltReblog.tabId = tabId;
-                    nonaltReblog.extensionId = extensionId;
+                    window.nonaltReblog.tabId = tabId;
+                    window.nonaltReblog.extensionId = extensionId;
                 });
                 scriptElement.addEventListener('error', () => {
                     console.error(`Failed to load \`${scriptUrl}\`.`);
@@ -860,15 +582,10 @@ async function inject(tabId) {
     }
 }
 
-// Inject `injection.js` when a new page is openend.
+// Inject `injection.js` when a new page is opened.
 const urlFilter = {
-    url: []
+    url: URLS.map(url => ({urlEquals: url}))
 };
-for (const url of URLS) {
-    urlFilter.url.push({
-        urlEquals: url
-    });
-}
 chrome.webNavigation.onCompleted.addListener(details => {
     const tabId = details.tabId;
     inject(tabId);
@@ -879,6 +596,6 @@ chrome.tabs.query({
     url: URLS
 }).then(tabs => {
     for (const tab of tabs) {
-        inject(tab.id);
+        inject(tab.id!);
     }
 });

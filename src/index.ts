@@ -1,4 +1,4 @@
-import { getLeftMostPostUrlInInnerHtml, sendMessageToExtension } from "./common";
+import { getLeftMostPostUrlInInnerHtml, LocalStorageData, sendMessageToExtension } from "./common";
 import { createTab, executeScript } from "./background/common";
 
 (async () => {
@@ -13,12 +13,11 @@ import { createTab, executeScript } from "./background/common";
         const postUrls = Object.keys(postUrlToImages);
 
         const pattern = /\d+$/;
-        const compareFunction = (lhs, rhs) => {
-            lhs = pattern.exec(lhs);
-            lhs = parseInt(lhs, 10);
-            rhs = pattern.exec(rhs);
-            rhs = parseInt(rhs, 10);
-            return lhs - rhs;
+        const compareFunction = (lhs: string, rhs: string) => {
+            // TODO: Handle mismatches.
+            const l = parseInt(pattern.exec(lhs)![0], 10);
+            const r = parseInt(pattern.exec(rhs)![0], 10);
+            return l - r;
         };
         postUrls.sort(compareFunction);
         return postUrls;
@@ -31,9 +30,10 @@ import { createTab, executeScript } from "./background/common";
             url: embedUrl,
             active: false
         });
+        const newTabId = newTab.id!;
         const embedCode = await executeScript({
             target: {
-                tabId: newTab.id
+                tabId: newTabId
             },
             func: () => {
                 const elementCandidates = document.getElementsByClassName('embed-code');
@@ -44,13 +44,14 @@ import { createTab, executeScript } from "./background/common";
                     return null;
                 }
                 const element = elementCandidates[0];
-                if (element.nodeName.toUpperCase() !== 'TEXTAREA') {
+                if (element.nodeName !== 'TEXTAREA') {
                     return null;
                 }
-                return element.value;
+                const textarea = element as HTMLTextAreaElement
+                return textarea.value;
             }
         });
-        await chrome.tabs.remove(newTab.id);
+        await chrome.tabs.remove(newTabId);
         if (embedCode === null) {
             console.error(`${embedUrl}: Failed to get the embed code.`);
             continue;
@@ -81,8 +82,9 @@ import { createTab, executeScript } from "./background/common";
     buttonElement.innerText = 'Complete';
     document.body.appendChild(buttonElement);
     buttonElement.addEventListener('click', async event => {
-        const items = {};
-        items['postUrlToImages'] = {};
+        const items: LocalStorageData = {
+            postUrlToImages: {}
+        };
         await chrome.storage.local.set(items);
 
         const tabCandidates = await chrome.tabs.query({
@@ -96,30 +98,27 @@ import { createTab, executeScript } from "./background/common";
         if (tabCandidates.length >= 2) {
             throw new Error('Multiple tabs are found.');
         }
-        const thisTabId = tabCandidates[0].id;
+        const thisTabId = tabCandidates[0].id!;
 
         chrome.tabs.remove(thisTabId);
     });
 })();
 
-async function queueForReblogging(event) {
+async function queueForReblogging(event: KeyboardEvent): Promise<void> {
     const target = event.target;
     if (target === null) {
         return;
     }
 
-    const postUrl = getLeftMostPostUrlInInnerHtml(target);
-    if (typeof postUrl !== 'string') {
+    const postUrl = getLeftMostPostUrlInInnerHtml(target as Element);
+    if (postUrl === null) {
         console.warn(`Failed to get the post URL.`);
         return;
     }
 
     const postUrlToImages = await (async () => {
-        const items = await chrome.storage.local.get('postUrlToImages');
-        if ('postUrlToImages' in items !== true) {
-            return {};
-        }
-        return items.postUrlToImages;
+        const items = await chrome.storage.local.get('postUrlToImages') as LocalStorageData;
+        return items.postUrlToImages ?? {};
     })();
 
     if (postUrl in postUrlToImages !== true) {
@@ -150,11 +149,11 @@ async function queueForReblogging(event) {
         return;
     }
 
-    const items = await chrome.storage.local.get('reblogQueue');
-    if ('reblogQueue' in items !== true) {
-        items['reblogQueue'] = [];
+    const items = await chrome.storage.local.get('reblogQueue') as LocalStorageData;
+    if (items.reblogQueue === undefined) {
+        items.reblogQueue = [];
     }
-    items['reblogQueue'].push({
+    items.reblogQueue.push({
         postUrl: postUrl,
         images: images
     });
@@ -180,7 +179,7 @@ document.addEventListener('keydown', event => {
         return;
     }
 
-    if (document.activeElement === null || document.activeElement.parentElement.id !== 'main') {
+    if (document.activeElement === null || document.activeElement.parentElement?.id !== 'main') {
         if (document.body.children.length === 0) {
             return;
         }
@@ -194,7 +193,10 @@ document.addEventListener('keydown', event => {
             element = element.nextElementSibling;
         }
         element.scrollIntoView();
-        element.focus();
+        // If the following cast fails, it is very likely that the design of the
+        // DOM structure in `index.html` has been changed, causing a divergence
+        // from the logic of this script.
+        (element as HTMLElement).focus();
         return;
     }
 
@@ -204,7 +206,10 @@ document.addEventListener('keydown', event => {
 
     const element = document.activeElement.nextElementSibling;
     element.scrollIntoView();
-    element.focus();
+    // If the following cast fails, it is very likely that the design of the DOM
+    // structure in `index.html` has been changed, causing a divergence from the
+    // logic of this script.
+    (element as HTMLElement).focus();
 });
 
 document.addEventListener('keydown', event => {
@@ -224,7 +229,7 @@ document.addEventListener('keydown', event => {
         return;
     }
 
-    if (document.activeElement === null || document.activeElement.parentElement.id !== 'main') {
+    if (document.activeElement === null || document.activeElement.parentElement?.id !== 'main') {
         if (document.body.children.length === 0) {
             return;
         }
@@ -238,7 +243,10 @@ document.addEventListener('keydown', event => {
             element = element.previousElementSibling;
         }
         element.scrollIntoView();
-        element.focus();
+        // If the following cast fails, it is very likely that the design of the
+        // DOM structure in `index.html` has been changed, causing a divergence
+        // from the logic of this script.
+        (element as HTMLElement).focus();
         return;
     }
 
@@ -248,7 +256,10 @@ document.addEventListener('keydown', event => {
 
     const element = document.activeElement.previousElementSibling;
     element.scrollIntoView();
-    element.focus();
+    // If the following cast fails, it is very likely that the design of the DOM
+    // structure in `index.html` has been changed, causing a divergence from the
+    // logic of this script.
+    (element as HTMLElement).focus();
 });
 
 document.addEventListener('keydown', async event => {

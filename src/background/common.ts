@@ -1,4 +1,4 @@
-export async function executeScript<T extends unknown[]>(scriptInjection: chrome.scripting.ScriptInjection<T>): Promise<unknown> {
+export async function executeScript<Args extends unknown[], Result>(scriptInjection: chrome.scripting.ScriptInjection<Args, Result>) {
     const injectionResults = await chrome.scripting.executeScript(scriptInjection);
     console.assert(injectionResults.length === 1, injectionResults.length);
     if (injectionResults.length === 0) {

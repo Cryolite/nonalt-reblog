@@ -1,76 +1,66 @@
-import { fetchImages } from '../common'
+import { Image, fetchImages } from '../common'
 import { executeScript, createTab } from '../background/common'
 
-async function expandPixivArtworks(tabId) {
+async function expandPixivArtworks(tabId: number): Promise<void> {
     await executeScript({
         target: {
             tabId: tabId
         },
         func: () => {
-            function expandImpl(element) {
+            function expandImpl(element: Element): void {
                 checkAndClick: {
-                    if (typeof element.nodeName !== 'string') {
+                    if (element.nodeName !== 'DIV') {
                         break checkAndClick;
                     }
-                    const name = element.nodeName.toUpperCase();
-                    if (name !== 'DIV') {
-                        break checkAndClick;
-                    }
+                    const div = element as HTMLDivElement;
 
-                    const innerText = element.innerText;
+                    const innerText = div.innerText;
                     if (innerText.search(/^\d+\/\d+$/) === -1) {
                         break checkAndClick;
                     }
 
-                    const onclick = element.onclick;
+                    const onclick = div.onclick;
                     if (onclick === null) {
                         break checkAndClick;
                     }
 
-                    element.click();
+                    div.click();
                     return;
                 }
 
-                const children = element.children;
-                if (typeof children !== 'object') {
-                    return;
-                }
-                for (const child of children) {
+                for (const child of element.children) {
                     expandImpl(child);
                 }
             }
 
-            expandImpl(document);
+            expandImpl(document.body);
         },
         world: 'MAIN'
     });
 }
 
-async function getPixivArtistUrl(tabId) {
+async function getPixivArtistUrl(tabId: number): Promise<string | null> {
     const artistUrl = await executeScript({
         target: {
             tabId: tabId
         },
         func: () => {
-            function impl(element) {
+            function impl(element: Element): string | null {
                 checkElement: {
-                    if (typeof element.nodeName !== 'string') {
+                    if (element.nodeName !== 'A') {
                         break checkElement;
                     }
-                    const name = element.nodeName.toUpperCase();
-                    if (name !== 'A') {
-                        break checkElement;
-                    }
+                    const anchor = element as HTMLAnchorElement;
 
-                    const innerText = element.innerText;
+                    const innerText = anchor.innerText;
                     if (innerText !== '作品一覧を見る') {
                         break checkElement;
                     }
 
-                    const href = element.href;
+                    const href = anchor.href;
                     const pattern = /^(https:\/\/www\.pixiv\.net\/users\/\d+)\/artworks$/;
                     const match = pattern.exec(href);
-                    if (Array.isArray(match) !== true) {
+                    if (match === null) {
                         break checkElement;
                     }
                     if (/^https:\/\/www\.pixiv\.net\/users\/\d+$/.test(match[1]) !== true) {
@@ -93,25 +83,27 @@ async function getPixivArtistUrl(tabId) {
                 return null;
             }
 
-            return impl(document);
+            return impl(document.body);
         },
         world: 'MAIN'
     });
     return artistUrl;
 }
 
-async function getPixivImagesImpl(tabId, sourceUrl, images) {
+async function getPixivImagesImpl(tabId: number, sourceUrl: string, images: Image[]): Promise<void> {
     const newTab = await createTab({
         openerTabId: tabId,
         url: sourceUrl,
         active: false
     });
+    const newTabId = newTab.id!;
+
     // Resource loading for the page sometimes takes a long time. In such cases,
     // `chrome.tabs.remove` gets stuck. To avoid this, the following script
     // injection sets a time limit on resource loading for the page.
     await executeScript({
         target: {
-            tabId: newTab.id
+            tabId: newTabId
         },
         func: () => {
             setTimeout(() => {
@@ -121,18 +113,18 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
         world: 'MAIN'
     });
 
-    const artistUrl = await getPixivArtistUrl(newTab.id);
+    const artistUrl = await getPixivArtistUrl(newTabId);
     if (typeof artistUrl !== 'string') {
         console.warn(`${sourceUrl}: Failed to get artist URL.`);
-        chrome.tabs.remove(newTab.id);
+        chrome.tabs.remove(newTabId);
         return;
     }
 
-    await expandPixivArtworks(newTab.id);
+    await expandPixivArtworks(newTabId);
 
     const linkUrls = await executeScript({
         target: {
-            tabId: newTab.id
+            tabId: newTabId
         },
         func: () => {
             const links = [];
@@ -158,14 +150,16 @@ async function getPixivImagesImpl(tabId, sourceUrl, images) {
     const imageUrlsUniqued = [...new Set(imageUrls)];
     const newImages = await fetchImages(imageUrlsUniqued, sourceUrl);
     for (const newImage of newImages) {
-        newImage.artistUrl = artistUrl;
-        images.push(newImage);
+        images.push({
+            ...newImage,
+            artistUrl
+        });
     }
 
-    chrome.tabs.remove(newTab.id);
+    chrome.tabs.remove(newTabId);
 }
 
-export async function getImages(tabId, hrefs, innerText) {
+export async function getImages(tabId: number, hrefs: string[], innerText: string): Promise<Image[]> {
     const sourceUrls = [];
     {
         const sourceUrlPattern = /^https:\/\/href\.li\/\?https:\/\/(?:www\.)?pixiv\.net(?:\/en)?(\/artworks\/\d+)/;
@@ -188,7 +182,7 @@ export async function getImages(tabId, hrefs, innerText) {
         }
     }
 
-    const images = [];
+    const images: Image[] = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
         await getPixivImagesImpl(tabId, sourceUrl, images);
     }

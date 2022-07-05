@@ -7,9 +7,9 @@ module.exports = {
   mode: 'none',
   target: 'web',
   entry: {
-    background: './src/background.js',
-    index: './src/index.js',
-    injection: './src/injection.js',
+    background: './src/background.ts',
+    index: './src/index.ts',
+    injection: './src/injection.ts',
   },
   resolve: {
     extensions: ['.js', '.ts'],
