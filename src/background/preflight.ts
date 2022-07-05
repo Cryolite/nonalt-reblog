@@ -198,7 +198,7 @@ export async function preflightOnPost(tabId: number, postUrl: string, postImageU
         // rejected. Since this function is expected to be called sequentially,
         // the following `await` does not interfere with concurrency.
         await preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
-    } catch (error: any) {
+    } catch (error: unknown) {
         printError(tabId, `A fatal error in \`preflightOnPost\`: ${error}`);
         sendResponse({
             errorMessage: (error as Error).message,
