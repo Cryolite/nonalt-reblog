@@ -193,7 +193,9 @@ document.addEventListener('keydown', event => {
             element = element.nextElementSibling;
         }
         element.scrollIntoView();
-        // TODO: Is the following cast safe?
+        // If the following cast fails, it is very likely that the design of the
+        // DOM structure in `index.html` has been changed, causing a divergence
+        // from the logic of this script.
         (element as HTMLElement).focus();
         return;
     }
@@ -204,7 +206,9 @@ document.addEventListener('keydown', event => {
 
     const element = document.activeElement.nextElementSibling;
     element.scrollIntoView();
-    // TODO: Is the following cast safe?
+    // If the following cast fails, it is very likely that the design of the DOM
+    // structure in `index.html` has been changed, causing a divergence from the
+    // logic of this script.
     (element as HTMLElement).focus();
 });
 
@@ -239,7 +243,9 @@ document.addEventListener('keydown', event => {
             element = element.previousElementSibling;
         }
         element.scrollIntoView();
-        // TODO: Is the following cast safe?
+        // If the following cast fails, it is very likely that the design of the
+        // DOM structure in `index.html` has been changed, causing a divergence
+        // from the logic of this script.
         (element as HTMLElement).focus();
         return;
     }
@@ -250,7 +256,9 @@ document.addEventListener('keydown', event => {
 
     const element = document.activeElement.previousElementSibling;
     element.scrollIntoView();
-    // TODO: Is the following cast safe?
+    // If the following cast fails, it is very likely that the design of the DOM
+    // structure in `index.html` has been changed, causing a divergence from the
+    // logic of this script.
     (element as HTMLElement).focus();
 });
 

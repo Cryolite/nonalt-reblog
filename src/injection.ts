@@ -134,7 +134,11 @@ async function initiatePreflight() {
             }
 
             const hrefs = getHrefsInInnerHtml(previousPostElement);
-            // TODO: Is the following cast safe?
+            // The following cast is based on the DOM structure of
+            // `www.tumblr.com/dashboard` as of 2022/07. Therefore, if this cast
+            // fails, it is very likely that the DOM structure has changed and
+            // deviates from the logic of this script. In this case, the DOM
+            // structure of `www.tumblr.com/dashboard` should be re-examined.
             const innerText = (previousPostElement as HTMLElement).innerText;
 
             {
@@ -303,7 +307,11 @@ document.addEventListener('keydown', event => {
 
     if (nonaltReblog.activeElement.previousElementSibling !== null) {
         nonaltReblog.activeElement = nonaltReblog.activeElement.previousElementSibling;
-        // TODO: Is the following cast safe?
+        // The following cast is based on the DOM structure of
+        // `www.tumblr.com/dashboard` as of 2022/07. Therefore, if this cast
+        // fails, it is very likely that the DOM structure has changed and
+        // deviates from the logic of this script. In this case, the DOM
+        // structure of `www.tumblr.com/dashboard` should be re-examined.
         (nonaltReblog.activeElement as HTMLElement).focus();
     }
 });
