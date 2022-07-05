@@ -98,8 +98,7 @@ export interface PreflightOnPostRequest {
 }
 
 export interface PreflightOnPostResponse {
-    // TODO: Consider removing or using this field.
-    errorMessage: null;
+    errorMessage: string | null;
     imageUrls: string[];
 }
 

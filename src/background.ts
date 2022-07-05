@@ -582,7 +582,7 @@ async function inject(tabId: number) {
     }
 }
 
-// Inject `injection.js` when a new page is openend.
+// Inject `injection.js` when a new page is opened.
 const urlFilter = {
     url: URLS.map(url => ({urlEquals: url}))
 };

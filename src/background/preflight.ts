@@ -174,8 +174,7 @@ async function preflightOnPostImpl(tabId: number, postUrl: string, postImageUrls
                 imageUrl: x.imageUrl
             };
         });
-        // TODO: Consider awaiting here.
-        addEntryToPostUrlToImages(postUrl, images);
+        await addEntryToPostUrlToImages(postUrl, images);
     }
 
     sendResponse({
@@ -184,13 +183,26 @@ async function preflightOnPostImpl(tabId: number, postUrl: string, postImageUrls
     });
 }
 
-export function preflightOnPost(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): void
+export async function preflightOnPost(tabId: number, postUrl: string, postImageUrls: string[], hrefs: string[], innerText: string, imageUrls: string[], sendResponse: (message: PreflightOnPostResponse) => void): Promise<void>
 {
     try {
-        // TODO: This function call returns a promise, thus never throws.
-        preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
-    } catch (error) {
+        // If an error occurs during the execution of the `preflightOnPostImpl`
+        // function and an exception is thrown, it would be complicated to write
+        // a try-catch block at each point and send the error message with the
+        // `sendResponse` function. Instead, let the exception go through to
+        // this try-catch block and consolidate the sending of the error message
+        // by the `sendResponse` function.
+        //
+        // Note that the following `await` is only for throwing an exception if
+        // the promise returned by the `preflightOnPostImpl` function is
+        // rejected. Since this function is expected to be called sequentially,
+        // the following `await` does not interfere with concurrency.
+        await preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
+    } catch (error: any) {
         printError(tabId, `A fatal error in \`preflightOnPost\`: ${error}`);
-        throw error;
+        sendResponse({
+            errorMessage: (error as Error).message,
+            imageUrls: []
+        });
     }
 }
