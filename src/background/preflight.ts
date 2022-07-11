@@ -200,9 +200,24 @@ export async function preflightOnPost(tabId: number, postUrl: string, postImageU
         await preflightOnPostImpl(tabId, postUrl, postImageUrls, hrefs, innerText, imageUrls, sendResponse);
     } catch (error: unknown) {
         printError(tabId, `A fatal error in \`preflightOnPost\`: ${error}`);
-        sendResponse({
-            errorMessage: (error as Error).message,
-            imageUrls: []
-        });
+        if (error instanceof Error) {
+            sendResponse({
+                errorMessage: (error as Error).message,
+                imageUrls: []
+            });
+        }
+        else if (error instanceof TypeError) {
+            // `fetch` may throw an exception of this type.
+            sendResponse({
+                errorMessage: (error as TypeError).message,
+                imageUrls: []
+            });
+        }
+        else {
+            sendResponse({
+                errorMessage: 'An exception is thrown.',
+                imageUrls: []
+            });
+        }
     }
 }

@@ -90,10 +90,16 @@ def _blobToImage(mime: str, blob: str) -> Optional[numpy.ndarray]:
     elif image.getbands() == ('L',):
         image = numpy.array(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    elif image.getbands() == ('P',):
-        # TODO: The following conversion is incorrect.
+    elif image.getbands() == ('L', 'A'):
+        # TODO: Make sure we are really okay with the following conversion.
+        image = image.convert('RGBA')
         image = numpy.array(image)
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+    elif image.getbands() == ('P',):
+        # TODO: Make sure we are really okay with the following conversion.
+        image = image.convert('RGB')
+        image = numpy.array(image)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     else:
         raise RuntimeError(f'{image.getbands()}: An unsupported bands.')
     return image
