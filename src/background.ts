@@ -147,6 +147,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
                 url: postUrl,
                 active: false
             }, 60 * 1000);
+            const newTabId = newTab.id!;
             const result = await executeScript({
                 target: {
                     tabId: newTabId
