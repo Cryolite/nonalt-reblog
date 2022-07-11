@@ -64,8 +64,8 @@ export async function createTab(createProperties: chrome.tabs.CreateProperties, 
     const tab = await chrome.tabs.create(createProperties);
     const tabId = tab.id!;
 
-    await new Promise<void>(async (resolve, reject) => {
-        const timeoutId = setTimeout(async () => {
+    await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
             chrome.tabs.remove(tabId);
             reject(new Error('Failed to create a tab due to timeout in resource loading.'));
         }, timeout);
