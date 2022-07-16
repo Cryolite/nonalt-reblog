@@ -130,7 +130,7 @@ async function getTwitterImagesImpl(tabId: number, sourceUrl: string, images: Im
         openerTabId: tabId,
         url: sourceUrl,
         active: true
-    });
+    }, 60 * 1000);
     const newTabId = newTab.id!;
 
     await waitForTweetToAppear(sourceUrl, newTabId, 100, 60 * 1000);
@@ -230,7 +230,11 @@ export async function getImages(tabId: number, hrefs: string[], innerText: strin
 
     const images: Image[] = [];
     for (const sourceUrl of [...new Set(sourceUrls)]) {
-        await getTwitterImagesImpl(tabId, sourceUrl, images);
+        try {
+            await getTwitterImagesImpl(tabId, sourceUrl, images);
+        } catch (error: unknown) {
+            console.error(error as Error);
+        }
     }
     return images;
 }
