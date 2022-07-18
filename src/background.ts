@@ -1,5 +1,5 @@
 import { Image, LocalStorageData, QueueForRebloggingResponse, RequestTypes, ResponseTypes, sleep } from './common';
-import { executeScript, printError, createTab } from './background/common';
+import { executeScript, printInfo, printWarning, printError, createTab } from './background/common';
 import { preflightOnPost } from './background/preflight';
 
 const URLS = [
@@ -17,13 +17,7 @@ async function queueForReblogging(tabId: number, postUrl: string, images: Image[
     });
     await chrome.storage.local.set(items);
 
-    executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: postUrl => { console.info(`${postUrl}: Queued for reblogging.`); },
-        args: [postUrl]
-    });
+    printInfo(tabId, `${postUrl}: Queued for reblogging.`);
 
     sendResponse({
         errorMessage: null
@@ -81,26 +75,48 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
         })();
         const imageUrls = reblogQueue[0].images.map(x => x.imageUrl);
 
+        // The following block is for phase 1 of Issue #10.
+        // See https://github.com/Cryolite/nonalt-reblog/issues/10 for detail.
+        // TODO: Remove the following block in phase 2 of Issue #10.
         {
-            // Check if all the image URLs have already been recorded in the
-            // local storage as reblogged, and if so, skip the post URL as it
-            // does not need to be reblogged.
+            const items = await chrome.storage.local.get(null) as LocalStorageData;
+            if (items.reblogHistory === undefined) {
+                items.reblogHistory = {};
+            }
+            const reblogHistory = items.reblogHistory;
+            for (const key in items) {
+                if (key.startsWith('http')) {
+                    const value = items[key] as number;
+                    reblogHistory[key] = value;
+                }
+            }
+            await chrome.storage.local.set(items);
+            for (const key in reblogHistory) {
+                if (key in items) {
+                    await chrome.storage.local.remove(key);
+                }
+            }
+        }
+
+        // Check if all the image URLs have already been recorded in the local
+        // storage as reblogged, and if so, skip the post URL as it does not
+        // need to be reblogged.
+        {
+            const items = await chrome.storage.local.get('reblogHistory') as LocalStorageData;
+            if (items.reblogHistory === undefined) {
+                items.reblogHistory = {};
+            }
+            const reblogHistory = items.reblogHistory;
+
             let allReblogged = true;
             for (const imageUrl of imageUrls) {
-                const items = await chrome.storage.local.get(imageUrl) as LocalStorageData;
-                if (imageUrl in items === false) {
+                if (imageUrl in reblogHistory === false) {
                     allReblogged = false;
                     break;
                 }
             }
             if (allReblogged === true) {
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: postUrl => { console.info(`${postUrl}: Already reblogged.`); },
-                    args: [postUrl]
-                });
+                printInfo(tabId, `${postUrl}: Already reblogged.`);
 
                 reblogQueue.shift();
                 await chrome.storage.local.set({
@@ -199,13 +215,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
             if (result === null) {
                 const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
                 console.warn(errorMessage);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: errorMessage => { console.warn(errorMessage); },
-                    args: [errorMessage]
-                });
+                printWarning(tabId, errorMessage);
                 throw new Error(errorMessage);
             }
 
@@ -248,13 +258,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
 
             const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
             console.warn(errorMessage);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: errorMessage => { console.warn(errorMessage); },
-                args: [errorMessage]
-            });
+            printWarning(tabId, errorMessage);
             throw new Error(errorMessage);
         }
         const [account, reblogKey] = await (async () => {
@@ -274,13 +278,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
 
             const errorMessage = `${postUrl}: Failed to extract the reblog key.`;
             console.error(errorMessage);
-            executeScript({
-                target: {
-                    tabId: tabId
-                },
-                func: errorMessage => { console.error(errorMessage); },
-                args: [errorMessage]
-            });
+            printError(tabId, errorMessage);
             throw new Error(errorMessage);
         })();
 
@@ -400,14 +398,9 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
                 credentials: 'include'
             });
             if (response.ok === false) {
-                console.warn(`Failed to connect to ${myDomain} (${response.status} ${response.statusText}).`);
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: (myDomain, status, statusText) => { console.warn(`Failed to connect to ${myDomain} (${status} ${statusText}).`); },
-                    args: [myDomain, response.status, response.statusText]
-                });
+                const errorMessage = `Failed to connect to ${myDomain} (${response.status}).`;
+                console.warn(errorMessage);
+                printWarning(tabId, errorMessage);
                 continue;
             }
 
@@ -417,11 +410,17 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
                 // reblog has been successfully committed.
 
                 // Record the image URLs in the local storage.
-                for (const imageUrl of imageUrls) {
-                    chrome.storage.local.set({
-                        [imageUrl]: Date.now()
-                    });
+                const items = await chrome.storage.local.get('reblogHistory') as LocalStorageData;
+                if (items.reblogHistory === undefined) {
+                    items.reblogHistory = {};
                 }
+                const reblogHistory = items.reblogHistory;
+                for (const imageUrl of imageUrls) {
+                    reblogHistory[imageUrl] = Date.now();
+                }
+                await chrome.storage.local.set({
+                    reblogHistory
+                });
 
                 // When the capacity of the local storage is running low,
                 // recorded image URLs are deleted from the oldest.
@@ -439,13 +438,7 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
                     await chrome.storage.local.remove(keysToRemove);
                 }
 
-                executeScript({
-                    target: {
-                        tabId: tabId
-                    },
-                    func: postUrl => { console.info(`${postUrl}: Reblogged.`); },
-                    args: [postUrl]
-                });
+                printInfo(tabId, `${postUrl}: Reblogged.`);
 
                 reblogQueue.shift();
                 await chrome.storage.local.set({
@@ -460,14 +453,9 @@ async function dequeueForReblogging(tabId: number): Promise<void> {
             continue;
         }
 
-        console.error(`${postUrl}: Failed to confirm the reblog.`);
-        executeScript({
-            target: {
-                tabId: tabId
-            },
-            func: postUrl => { console.error(`${postUrl}: Failed to confirm the reblog.`); },
-            args: [postUrl]
-        });
+        const errorMessage = `${postUrl}: Failed to confirm the reblog.`;
+        console.error(errorMessage);
+        printError(tabId, errorMessage);
         return;
     }
 }
