@@ -80,9 +80,36 @@ async function findInReblogQueue(imageUrl: string): Promise<boolean> {
     return imageUrls.includes(imageUrl);
 }
 
-async function findInLocalStorage(imageUrl: string): Promise<boolean> {
-    const items = await chrome.storage.local.get(imageUrl) as LocalStorageData;
-    return imageUrl in items;
+async function findInReblogHistory(imageUrl: string): Promise<boolean> {
+    // The following block is for phase 1 of Issue #10.
+    // See https://github.com/Cryolite/nonalt-reblog/issues/10 for detail.
+    // TODO: Remove the following block in phase 2 of Issue #10.
+    {
+        const items = await chrome.storage.local.get(null) as LocalStorageData;
+        if (items.reblogHistory === undefined) {
+            items.reblogHistory = {};
+        }
+        const reblogHistory = items.reblogHistory;
+        for (const key in items) {
+            if (key.startsWith('http')) {
+                const value = items[key] as number;
+                reblogHistory[key] = value;
+            }
+        }
+        await chrome.storage.local.set(items);
+        for (const key in reblogHistory) {
+            if (key in items) {
+                await chrome.storage.local.remove(key);
+            }
+        }
+    }
+
+    const items = await chrome.storage.local.get('reblogHistory') as LocalStorageData;
+    if (items.reblogHistory === undefined) {
+        items.reblogHistory = {};
+    }
+    const reblogHistory = items.reblogHistory;
+    return imageUrl in reblogHistory;
 }
 
 async function addEntryToPostUrlToImages(postUrl: string, images: Image[]): Promise<void> {
@@ -145,7 +172,7 @@ async function preflightOnPostImpl(tabId: number, postUrl: string, postImageUrls
                 break checkForDuplication;
             }
 
-            if (await findInLocalStorage(imageUrl) === true) {
+            if (await findInReblogHistory(imageUrl) === true) {
                 printInfo(tabId, `${imageUrl}: Already reblogged.`);
                 break checkForDuplication;
             }

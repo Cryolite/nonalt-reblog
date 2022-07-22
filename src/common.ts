@@ -15,10 +15,14 @@ export interface ReblogQueue {
 }
 
 export interface LocalStorageData {
-    // TODO: Consider storing image URLs in a subitem.
-    [imageUrl: string]: Date | ReblogQueue[] | Record<string, Image[]> | undefined;
+    // TODO: Remove the following line in the phase 2 of https://github.com/Cryolite/nonalt-reblog/issues/10.
+    [imageUrl: string]: number | ReblogQueue[] | Record<string, Image[]> | Record<string, number> | undefined;
     reblogQueue?: ReblogQueue[];
     postUrlToImages?: Record<string, Image[]>;
+    // `Record<string, Date>` would be clearer as to the intent of the following
+    // type, but unfortunately `Date` is not serializable to Chrome extension
+    // storage, so Unix time in milliseconds is represented as `number` instead.
+    reblogHistory?: Record<string, number>;
 }
 
 export async function sleep(milliseconds: number): Promise<void> {
