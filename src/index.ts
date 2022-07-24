@@ -1,15 +1,34 @@
-import { getLeftMostPostUrlInInnerHtml, LocalStorageData, sendMessageToExtension } from "./common";
+import { getLeftMostPostUrlInInnerHtml, ReblogQueue, LocalStorageData, sendMessageToExtension } from "./common";
 import { createTab, executeScript } from "./background/common";
 
 (async () => {
-    const postUrls = await (async () => {
+    const reblogQueue: ReblogQueue = await(async () => {
+        const items = await chrome.storage.local.get('reblogQueue');
+        if (items.reblogQueue === undefined) {
+            return {};
+        }
+        return items.reblogQueue;
+    })();
+
+    const reblogHistory: Record<string, number> = await (async () => {
+        const items = await chrome.storage.local.get('reblogHistory');
+        if (items.reblogHistory === undefined) {
+            return {};
+        }
+        return items.reblogHistory;
+    })();
+
+    const postUrlToImages = await (async() => {
         const result = await sendMessageToExtension(chrome.runtime.id, {
             type: 'loadPostUrlToImages'
         });
         if (result.errorMessage !== null) {
             throw new Error(result.errorMessage);
         }
-        const postUrlToImages = result.postUrlToImages;
+        return result.postUrlToImages;
+    })();
+
+    const postUrls = await (async () => {
         const postUrls = Object.keys(postUrlToImages);
 
         const pattern = /\d+$/;
@@ -23,45 +42,56 @@ import { createTab, executeScript } from "./background/common";
         return postUrls;
     })();
 
-    for (const postUrl of postUrls) {
-        const embedUrl = `${postUrl}/embed`;
-
-        const newTab = await createTab({
-            url: embedUrl,
-            active: false
-        }, 60 * 1000);
-        const newTabId = newTab.id!;
-        const embedCode = await executeScript({
-            target: {
-                tabId: newTabId
-            },
-            func: () => {
-                const elementCandidates = document.getElementsByClassName('embed-code');
-                if (elementCandidates.length === 0) {
-                    return null;
-                }
-                if (elementCandidates.length >= 2) {
-                    return null;
-                }
-                const element = elementCandidates[0];
-                if (element.nodeName !== 'TEXTAREA') {
-                    return null;
-                }
-                const textarea = element as HTMLTextAreaElement
-                return textarea.value;
+    {
+        const alreadyDisplayedImageUrls = new Set<string>();
+        for (const postUrl of [...new Set(postUrls)]) {
+            const imageUrls = postUrlToImages[postUrl].map(x => x.imageUrl);
+            if (imageUrls.find(x => x in reblogQueue === false && x in reblogHistory === false && !alreadyDisplayedImageUrls.has(x)) === undefined) {
+                console.info(`${postUrl}: No images need to be reblogged.`);
+                continue;
             }
-        });
-        await chrome.tabs.remove(newTabId);
-        if (embedCode === null) {
-            console.error(`${embedUrl}: Failed to get the embed code.`);
-            continue;
+
+            const embedUrl = `${postUrl}/embed`;
+
+            const newTab = await createTab({
+                url: embedUrl,
+                active: false
+            }, 60 * 1000);
+            const newTabId = newTab.id!;
+            const embedCode = await executeScript({
+                target: {
+                    tabId: newTabId
+                },
+                func: () => {
+                    const elementCandidates = document.getElementsByClassName('embed-code');
+                    if (elementCandidates.length === 0) {
+                        return null;
+                    }
+                    if (elementCandidates.length >= 2) {
+                        return null;
+                    }
+                    const element = elementCandidates[0];
+                    if (element.nodeName !== 'TEXTAREA') {
+                        return null;
+                    }
+                    const textarea = element as HTMLTextAreaElement
+                    return textarea.value;
+                }
+            });
+            await chrome.tabs.remove(newTabId);
+            if (embedCode === null) {
+                console.error(`${embedUrl}: Failed to get the embed code.`);
+                continue;
+            }
+
+            document.body.insertAdjacentHTML('beforeend', `<div tabindex="0"><a href="${postUrl}" style="display: none;"></a></div>`);
+            const postContainerElement = document.body.children[document.body.children.length - 1];
+
+            const newEmbedCode = embedCode.replace(/\\x3Cscript\s.+?<\/script>/, '')
+            postContainerElement.insertAdjacentHTML('beforeend', newEmbedCode);
+
+            imageUrls.forEach(x => alreadyDisplayedImageUrls.add(x));
         }
-
-        document.body.insertAdjacentHTML('beforeend', `<div tabindex="0"><a href="${postUrl}" style="display: none;"></a></div>`);
-        const postContainerElement = document.body.children[document.body.children.length - 1];
-
-        const newEmbedCode = embedCode.replace(/\\x3Cscript\s.+?<\/script>/, '')
-        postContainerElement.insertAdjacentHTML('beforeend', newEmbedCode);
     }
 
     const scriptElement = document.createElement('script');
