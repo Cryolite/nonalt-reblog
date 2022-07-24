@@ -45,8 +45,13 @@ import { createTab, executeScript } from "./background/common";
     {
         const alreadyDisplayedImageUrls = new Set<string>();
         for (const postUrl of [...new Set(postUrls)]) {
+            if (postUrl in reblogQueue) {
+                console.info(`${postUrl}: Already queued to be reblogged.`);
+                continue;
+            }
+
             const imageUrls = postUrlToImages[postUrl].map(x => x.imageUrl);
-            if (imageUrls.find(x => x in reblogQueue === false && x in reblogHistory === false && !alreadyDisplayedImageUrls.has(x)) === undefined) {
+            if (imageUrls.find(x => x in reblogHistory === false && !alreadyDisplayedImageUrls.has(x)) === undefined) {
                 console.info(`${postUrl}: No images need to be reblogged.`);
                 continue;
             }
